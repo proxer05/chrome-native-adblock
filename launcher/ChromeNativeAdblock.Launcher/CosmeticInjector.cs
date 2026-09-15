@@ -424,24 +424,17 @@ public sealed class CosmeticInjector : IDisposable
 
     // 1. Defuser / Property Trapper (uBlock Origin pattern)
     // Strips ad placements from YouTube player responses before player initialization.
-    // The adBreak* scheduling keys are deliberately kept: the September 2026
-    // player (cver 2.2026090x) uses them to compute server-stitched ad break
-    // boundaries, and pruning them makes skipAd()/ad-end seeks land at the end
-    // of the content instead of the end of the ad.
+    // The adBreak* scheduling keys and playbackTracking URLs are deliberately
+    // kept: the 2026 player (cver 2.2026090x) uses the scheduling keys to
+    // compute server-stitched ad break boundaries, and its preloaded-fragment
+    // playback handshake depends on the tracking endpoints (which the engine
+    // allows via its playback-essential exception).
     function sanitizePlayerResponse(obj) {
         if (!obj || typeof obj !== 'object') return obj;
         try {
             if (obj.adPlacements) delete obj.adPlacements;
             if (obj.playerAds) delete obj.playerAds;
             if (obj.adSlots) delete obj.adSlots;
-            if (obj.playbackTracking) {
-                delete obj.playbackTracking.videostatsPlaybackUrl;
-                delete obj.playbackTracking.videostatsDelayplayUrl;
-                delete obj.playbackTracking.videostatsWatchtimeUrl;
-                delete obj.playbackTracking.ptrackingUrl;
-                delete obj.playbackTracking.qoeUrl;
-                delete obj.playbackTracking.atrUrl;
-            }
         } catch (e) {}
         return obj;
     }

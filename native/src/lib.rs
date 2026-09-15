@@ -371,12 +371,31 @@ pub fn is_ad_stream_or_tracker(url: &str) -> bool {
         || lower.contains("youtube.com/ptracking")
 }
 
+/// YouTube endpoints that the 2026 player requires for its preloaded-fragment
+/// playback handshake. EasyPrivacy-style subscriptions block them as telemetry
+/// (e.g. `||youtube.com/api/stats/qoe?*...&event=streamingstats&`), and when
+/// they are cancelled the new player stalls after the preloaded ad segment
+/// instead of starting the main video. They are YouTube's own telemetry on
+/// YouTube's own domains - never ads - so they are always allowed regardless
+/// of the loaded rules.
+pub fn is_youtube_playback_essential(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    (lower.contains("youtube.com/youtubei/v1/log_event")
+        || lower.contains("youtube.com/api/stats/qoe")
+        || lower.contains("youtube.com/api/stats/watchtime"))
+        && !lower.contains("youtube.com/api/stats/ads")
+}
+
 pub fn check_request(
     url: &str,
     source_url: &str,
     request_type: &str,
     method: &str,
 ) -> Result<bool, String> {
+    if is_youtube_playback_essential(url) {
+        return Ok(false);
+    }
+
     if is_ad_stream_or_tracker(url) {
         return Ok(true);
     }
@@ -921,10 +940,55 @@ mod tests {
         );
     }
     #[test]
+    fn test_youtube_playback_essential_endpoints_always_allowed() {
+        let _lock = TEST_MUTEX.lock().unwrap();
+        // The exact EasyPrivacy-style rules observed blocking these endpoints
+        // (easyprivacy.txt lines ~17344-17364).
+        load_filter_text(
+            "||youtube.com/api/stats/qoe?*page&ns=yt&fexp=v1%*&event=streamingstats&\n\
+             ||youtube.com/youtubei/v1/log_event?\n\
+             ||youtube.com/api/stats/watchtime?"
+                .to_string(),
+        )
+        .expect("load filter");
+
+        // The 2026 player's preloaded-fragment playback handshake endpoints.
+        assert!(!check_request(
+            "https://www.youtube.com/youtubei/v1/log_event?alt=json",
+            "https://www.youtube.com/",
+            "other",
+            "GET"
+        )
+        .expect("check"));
+        assert!(!check_request(
+            "https://www.youtube.com/api/stats/qoe?fmt=397&afmt=251&cpn=x&el=detailpage&ns=yt&event=streamingstats&cplatform=DESKTOP",
+            "https://www.youtube.com/",
+            "other",
+            "GET"
+        )
+        .expect("check"));
+        assert!(!check_request(
+            "https://www.youtube.com/api/stats/watchtime?v=abc",
+            "https://www.youtube.com/",
+            "other",
+            "GET"
+        )
+        .expect("check"));
+
+        // The ad-specific stats endpoint stays blocked.
+        assert!(check_request(
+            "https://www.youtube.com/api/stats/ads?v=123&ad_type=1",
+            "https://www.youtube.com/",
+            "other",
+            "GET"
+        )
+        .expect("check"));
+    }
+
+    #[test]
     fn test_ad_stream_and_tracker_detection() {
         let _lock = TEST_MUTEX.lock().unwrap();
         load_filter_text("||example.com^".to_string()).expect("load filter");
-
         // DoubleClick & GoogleSyndication
         assert!(
             check_request(
