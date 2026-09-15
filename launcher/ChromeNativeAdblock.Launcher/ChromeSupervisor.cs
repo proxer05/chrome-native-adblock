@@ -50,6 +50,7 @@ public sealed class ChromeSupervisor : IDisposable
         _filterPath = _options.FilterPath ?? Path.Combine(defaultFiltersDir, "combined_rules.txt");
 
         _cosmeticInjector = new CosmeticInjector();
+        ChromeLpacAccess.LogDiagnostics = message => Log(message, ConsoleColor.Yellow);
 
         // Enable real-time console & live block monitor if not disabled and native adblock is active
         var enableMonitor = _options.EnableNativeAdblock &&
@@ -127,6 +128,19 @@ public sealed class ChromeSupervisor : IDisposable
         if (_options.EnableNativeAdblock)
         {
             chromeArgumentsList.Add($"--remote-debugging-port={effectivePort}");
+            // Chrome 155+ applies a non-Microsoft-signed DLL block
+            // (MITIGATION_FORCE_MS_SIGNED_BINS) to every sandboxed process when
+            // the network-service sandbox is enabled, which stops the unsigned
+            // native engine from loading into the Network Service. Chrome's own
+            // switch for allowing third-party modules skips only that block;
+            // the sandbox itself (including the LPAC) stays fully enabled.
+            const string allowThirdPartyModules = "--allow-third-party-modules";
+            var hasAllowSwitch = _options.AdditionalArguments?.Contains(
+                allowThirdPartyModules, StringComparer.OrdinalIgnoreCase) ?? false;
+            if (!hasAllowSwitch)
+            {
+                chromeArgumentsList.Add(allowThirdPartyModules);
+            }
         }
         chromeArgumentsList.Add("--no-default-browser-check");
         chromeArgumentsList.Add("--no-first-run");

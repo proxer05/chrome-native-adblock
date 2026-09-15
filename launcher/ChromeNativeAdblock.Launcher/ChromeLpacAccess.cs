@@ -33,6 +33,9 @@ internal static class ChromeLpacAccess
     private static readonly object Sync = new();
     private static readonly HashSet<string> GrantedPaths = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Optional diagnostics sink (the supervisor logs into the GUI console).</summary>
+    internal static Action<string>? LogDiagnostics { get; set; }
+
     /// <summary>
     /// Grants every network-sandbox capability that may apply to the Chrome install
     /// running <paramref name="targetProcessId"/> read/execute access to the engine
@@ -218,7 +221,7 @@ internal static class ChromeLpacAccess
         }
         catch (Exception ex) when (warnOnFailure)
         {
-            Console.Error.WriteLine($"[LPAC] Could not grant '{capabilityName}' access to '{path}': {ex.Message}");
+            LogDiagnostics?.Invoke($"[LPAC] Could not grant '{capabilityName}' access to '{path}': {ex.Message}");
         }
         catch (Exception)
         {

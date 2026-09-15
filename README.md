@@ -98,9 +98,12 @@ Create release archives:
 - Hook targets must reside in executable `.text` and match verified prefixes.
 - `chrome.dll` and other Chrome installation files are never changed on disk.
 - Chrome's own sandbox stays fully enabled. When Chrome 155+ runs the Network
-  Service inside the network-sandbox LPAC, the launcher grants that capability
-  read/execute access on the engine DLL and filter files instead of disabling
-  the sandbox; the block-log pipe admits only read/write clients.
+  Service inside the sandbox, the launcher (a) grants Chrome's per-channel
+  network-sandbox capability read/execute access on the engine DLL and filter
+  files and (b) passes Chrome's documented `--allow-third-party-modules`
+  switch, which skips only the non-Microsoft-signed DLL block that would
+  otherwise stop the engine from loading; the sandbox and its LPAC stay on.
+  The block-log pipe admits only read/write clients.
 - CDP discovery trusts only a fresh `DevToolsActivePort` from the managed
   profile; it does not fall back to another Chrome profile or port 9222.
 - Filter downloads are HTTPS subscription URLs controlled by their respective
