@@ -404,6 +404,14 @@ public sealed class CosmeticInjector : IDisposable
 })();
 """;
     }
+    /// <summary>
+    /// Set CNA_DISABLE_YT_BYPASS=1 to skip the YouTube bypass scriptlet entirely
+    /// (network + engine filtering stay on) - used to attribute playback issues
+    /// to the scriptlet versus the network rules.
+    /// </summary>
+    public static bool YouTubeBypassEnabled =>
+        !string.Equals(Environment.GetEnvironmentVariable("CNA_DISABLE_YT_BYPASS"), "1", StringComparison.OrdinalIgnoreCase);
+
     public static string BuildYouTubeBypassScript()
     {
         return """
@@ -415,15 +423,17 @@ public sealed class CosmeticInjector : IDisposable
     window.__cnaYtSafeCleanupInstalled = true;
 
     // 1. Defuser / Property Trapper (uBlock Origin pattern)
-    // Strips ad placements from YouTube player responses before player initialization
+    // Strips ad placements from YouTube player responses before player initialization.
+    // The adBreak* scheduling keys are deliberately kept: the September 2026
+    // player (cver 2.2026090x) uses them to compute server-stitched ad break
+    // boundaries, and pruning them makes skipAd()/ad-end seeks land at the end
+    // of the content instead of the end of the ad.
     function sanitizePlayerResponse(obj) {
         if (!obj || typeof obj !== 'object') return obj;
         try {
             if (obj.adPlacements) delete obj.adPlacements;
             if (obj.playerAds) delete obj.playerAds;
             if (obj.adSlots) delete obj.adSlots;
-            if (obj.adBreakHeartbeatParams) delete obj.adBreakHeartbeatParams;
-            if (obj.adBreakService) delete obj.adBreakService;
             if (obj.playbackTracking) {
                 delete obj.playbackTracking.videostatsPlaybackUrl;
                 delete obj.playbackTracking.videostatsDelayplayUrl;
@@ -570,11 +580,16 @@ public sealed class CosmeticInjector : IDisposable
                     }
                 } catch (e) {}
 
-                const video = player.querySelector('video');
-                if (video && !isNaN(video.duration) && video.duration > 0 && video.duration < 120) {
+                // Only accelerate the video inside the real ad containers
+                // (.video-ads / .ytp-ad-module). The 2026 player keeps the main
+                // video element mounted during preloaded server-stitched ads, so
+                // seeking an arbitrary player video lands the main video on its
+                // end and playback never recovers.
+                const adVideo = player.querySelector('.video-ads video, .ytp-ad-module video');
+                if (adVideo && !isNaN(adVideo.duration) && adVideo.duration > 0 && adVideo.duration < 120) {
                     try {
-                        video.muted = true;
-                        video.currentTime = video.duration;
+                        adVideo.muted = true;
+                        adVideo.currentTime = adVideo.duration;
                         skipped = true;
                     } catch(e) {}
                 }
@@ -1088,7 +1103,10 @@ public sealed class CosmeticInjector : IDisposable
         }
 
         // 6. YouTube bypass helper scriptlet
-        sb.AppendLine(BuildYouTubeBypassScript());
+        if (YouTubeBypassEnabled)
+        {
+            sb.AppendLine(BuildYouTubeBypassScript());
+        }
 
         // 7. Smart Container Collapser JS (Layout Healer)
         sb.AppendLine(BuildSmartContainerCollapserScript());
@@ -1143,7 +1161,7 @@ public sealed class CosmeticInjector : IDisposable
         {
             payload.AppendLine(resources.InjectedScript);
         }
-        if (isYouTube) payload.AppendLine(BuildYouTubeBypassScript());
+        if (isYouTube && YouTubeBypassEnabled) payload.AppendLine(BuildYouTubeBypassScript());
         if (isVietnameseNews) payload.AppendLine(BuildSmartContainerCollapserScript());
 
         if (payload.Length == 0) return string.Empty;
