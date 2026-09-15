@@ -125,21 +125,39 @@ public sealed class ChromeSupervisor : IDisposable
         }
 
         var chromeArgumentsList = new List<string>();
+        var additionalArguments = _options.AdditionalArguments;
         if (_options.EnableNativeAdblock)
         {
             chromeArgumentsList.Add($"--remote-debugging-port={effectivePort}");
-            // Chrome 155+ applies a non-Microsoft-signed DLL block
-            // (MITIGATION_FORCE_MS_SIGNED_BINS) to every sandboxed process when
-            // the network-service sandbox is enabled, which stops the unsigned
-            // native engine from loading into the Network Service. Chrome's own
-            // switch for allowing third-party modules skips only that block;
-            // the sandbox itself (including the LPAC) stays fully enabled.
-            const string allowThirdPartyModules = "--allow-third-party-modules";
-            var hasAllowSwitch = _options.AdditionalArguments?.Contains(
-                allowThirdPartyModules, StringComparer.OrdinalIgnoreCase) ?? false;
-            if (!hasAllowSwitch)
+
+            // Chrome 155+ enables the network-service sandbox on some builds
+            // (Finch). The sandboxed Network Service process gets a
+            // non-Microsoft-signed DLL block (MITIGATION_FORCE_MS_SIGNED_BINS)
+            // and a dynamic-code prohibition, and Chrome forwards no switch to
+            // sandboxed children that lifts either one - both make the
+            // MinHook-based engine impossible to install. Disabling only the
+            // network-service sandbox feature restores the exact Chrome <=153
+            // model; every other sandbox (renderers, GPU, ...) stays enabled.
+            const string networkSandboxFeature = "NetworkServiceSandbox";
+            const string disableFeaturesPrefix = "--disable-features=";
+            var userDisableFeatures = additionalArguments?.FirstOrDefault(
+                a => a.StartsWith(disableFeaturesPrefix, StringComparison.OrdinalIgnoreCase));
+            var userFeatures = userDisableFeatures?[disableFeaturesPrefix.Length..];
+            var needsFeature = userFeatures?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Contains(networkSandboxFeature, StringComparer.OrdinalIgnoreCase) != true;
+            if (needsFeature)
             {
-                chromeArgumentsList.Add(allowThirdPartyModules);
+                var merged = string.IsNullOrEmpty(userFeatures)
+                    ? networkSandboxFeature
+                    : $"{userFeatures},{networkSandboxFeature}";
+                chromeArgumentsList.Add($"{disableFeaturesPrefix}{merged}");
+                if (userDisableFeatures != null)
+                {
+                    // Replaced by the merged entry above.
+                    additionalArguments = additionalArguments?
+                        .Where(a => !a.StartsWith(disableFeaturesPrefix, StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+                }
             }
         }
         chromeArgumentsList.Add("--no-default-browser-check");
@@ -150,9 +168,9 @@ public sealed class ChromeSupervisor : IDisposable
             chromeArgumentsList.Add($"--user-data-dir={Path.GetFullPath(effectiveUserDataDir)}");
         }
 
-        if (_options.AdditionalArguments is { Length: > 0 })
+        if (additionalArguments is { Length: > 0 })
         {
-            chromeArgumentsList.AddRange(_options.AdditionalArguments);
+            chromeArgumentsList.AddRange(additionalArguments);
         }
 
         if (_options.OpenExtensionsPage)

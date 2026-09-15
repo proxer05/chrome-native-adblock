@@ -22,7 +22,9 @@ a modern Windows 11 WinUI 3 desktop dashboard.
 - Can optionally enable Manifest V2 using the semantic RAM patch from
   [chrome-enable-mv2](https://github.com/onlytrisdev/chrome-enable-mv2).
 
-No Chrome sandbox or code-integrity mitigation is disabled. No telemetry is
+No Chrome sandbox or code-integrity mitigation is disabled except the
+network-service sandbox feature, which the native hook requires on Chrome 155+
+(see the security model below). No telemetry is
 collected by this project.
 
 ## Compatibility
@@ -97,13 +99,17 @@ Create release archives:
 - Unknown hook layouts fail closed.
 - Hook targets must reside in executable `.text` and match verified prefixes.
 - `chrome.dll` and other Chrome installation files are never changed on disk.
-- Chrome's own sandbox stays fully enabled. When Chrome 155+ runs the Network
-  Service inside the sandbox, the launcher (a) grants Chrome's per-channel
-  network-sandbox capability read/execute access on the engine DLL and filter
-  files and (b) passes Chrome's documented `--allow-third-party-modules`
-  switch, which skips only the non-Microsoft-signed DLL block that would
-  otherwise stop the engine from loading; the sandbox and its LPAC stay on.
-  The block-log pipe admits only read/write clients.
+- When the native network hook is enabled on Chrome 155+ (where Chrome enables
+  the network-service sandbox on some builds), the launcher passes
+  `--disable-features=NetworkServiceSandbox`. A sandboxed Network Service
+  applies a non-Microsoft-signed DLL block and a dynamic-code prohibition that
+  make any MinHook-based engine impossible to install, and Chrome provides no
+  switch that lifts only those mitigations for sandboxed children. All other
+  Chrome sandboxing (renderers, GPU, utility processes, ...) stays fully
+  enabled. The launcher also grants Chrome's per-channel network-sandbox
+  capability and ALL APPLICATION PACKAGES read/execute access on the engine
+  files so the engine keeps loading on builds where the sandbox stays on
+  without the hook (MV2-only mode).
 - CDP discovery trusts only a fresh `DevToolsActivePort` from the managed
   profile; it does not fall back to another Chrome profile or port 9222.
 - Filter downloads are HTTPS subscription URLs controlled by their respective
