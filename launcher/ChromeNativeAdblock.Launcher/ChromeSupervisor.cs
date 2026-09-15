@@ -513,6 +513,64 @@ public sealed class ChromeSupervisor : IDisposable
         }
     }
 
+    private async Task MonitorNetworkServiceLoopAsync(Func<uint> getBrowserPid, string? userDataDir, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var browserPid = getBrowserPid();
+                var networkPids = ChromeProcesses.FindNetworkServices(browserPid, userDataDir);
+                foreach (var networkPid in networkPids)
+                {
+                    bool isNew;
+                    lock (_sync)
+                    {
+                        isNew = _hookedNetworkProcesses.Add(networkPid);
+                    }
+
+                    if (isNew)
+                    {
+                        if (NetworkHookDisabled)
+                        {
+                            Log($"[Supervisor] CNA_DISABLE_NETWORK_HOOK=1 - skipping hook injection for PID {networkPid}.", ConsoleColor.Yellow);
+                            continue;
+                        }
+
+                        Log($"[Supervisor] Detected Network Service process (PID: {networkPid}). Injecting native hook...", ConsoleColor.Yellow);
+
+                        try
+                        {
+                            var result = InjectionSmoke.InjectExisting(networkPid, _dllPath, _filterPath, installHook: true);
+                            Log($"[Supervisor] Successfully hooked Network Service (PID: {result.ProcessId}). Hook Status: Active ({result.HookResolutionMode}).", ConsoleColor.Green);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"[Supervisor] Failed to inject hook into PID {networkPid}: {ex.Message}", ConsoleColor.Red);
+                            lock (_sync)
+                            {
+                                _hookedNetworkProcesses.Remove(networkPid);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Continue polling
+            }
+
+            try
+            {
+                await Task.Delay(250, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
     private async Task RunCdpPipeLoopAsync(Func<string, string> injectionScriptFactory, CancellationToken cancellationToken)
     {
         if (_cdpParentRead == 0 || _cdpParentWrite == 0)
