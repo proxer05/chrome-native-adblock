@@ -157,81 +157,31 @@ internal static class ChromeLpacAccess
         return string.Join("-", parts);
     }
 
-    private const int SeFileObject = 1;
-    private const int DaclSecurityInformation = 4;
-    private const uint GrantAccess = 1;
-    private const int TrusteeIsSid = 4;
-    private const uint GenericRead = 0x80000000;
-    private const uint GenericExecute = 0x20000000;
-    // FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE for ancestor directories:
-    // enough to walk the path, without list-directory rights.
-    private const uint DirectoryTraversal = 0x001000A0;
-
     private static void TryGrant(string path, bool isDirectory, string sid, string capabilityName, bool warnOnFailure)
     {
         try
         {
-            // ConvertStringSidToSidW turns the S-1-15-3-1024-... string into the
-            // real SID; LookupAccountName (used for TRUSTEE_IS_NAME trustees)
-            // cannot resolve SDDL strings and fails with ERROR_NONE_MAPPED.
-            if (!ConvertStringSidToSidW(sid, out var sidPtr))
+            // Managed ACL API (the same underlying SetEntriesInAcl path icacls
+            // uses). AddAccessRule merges with an existing allow rule for the
+            // same trustee and rights, so repeated grants do not grow the DACL.
+            var identity = new System.Security.Principal.SecurityIdentifier(sid);
+            var rights = isDirectory
+                ? System.Security.AccessControl.FileSystemRights.ReadAndExecute
+                : System.Security.AccessControl.FileSystemRights.Read | System.Security.AccessControl.FileSystemRights.ExecuteFile;
+            var rule = new System.Security.AccessControl.FileSystemAccessRule(
+                identity, rights, System.Security.AccessControl.AccessControlType.Allow);
+
+            if (isDirectory)
             {
-                throw new InvalidOperationException($"ConvertStringSidToSid failed with 0x{Marshal.GetLastWin32Error():X8}");
+                var security = System.IO.Directory.GetAccessControl(path);
+                security.AddAccessRule(rule);
+                System.IO.Directory.SetAccessControl(path, security);
             }
-
-            try
+            else
             {
-                var entry = new ExplicitAccess
-                {
-                    AccessPermissions = isDirectory ? DirectoryTraversal : GenericRead | GenericExecute,
-                    AccessMode = GrantAccess,
-                    Inheritance = 0,
-                    Trustee = new Trustee
-                    {
-                        TrusteeForm = TrusteeIsSid,
-                        Name = sidPtr
-                    }
-                };
-
-                var result = GetNamedSecurityInfoW(
-                    path, SeFileObject, DaclSecurityInformation,
-                    out _, out _, out var dacl, out _, out var securityDescriptor);
-                if (result != 0)
-                {
-                    throw new InvalidOperationException($"GetNamedSecurityInfo failed with 0x{result:X8}");
-                }
-
-                try
-                {
-                    result = SetEntriesInAclW(1, in entry, dacl, out var newAcl);
-                    if (result != 0)
-                    {
-                        throw new InvalidOperationException($"SetEntriesInAcl failed with 0x{result:X8}");
-                    }
-
-                    try
-                    {
-                        result = SetNamedSecurityInfoW(
-                            path, SeFileObject, DaclSecurityInformation,
-                            IntPtr.Zero, IntPtr.Zero, newAcl, IntPtr.Zero);
-                        if (result != 0)
-                        {
-                            throw new InvalidOperationException($"SetNamedSecurityInfo failed with 0x{result:X8}");
-                        }
-                    }
-                    finally
-                    {
-                        _ = LocalFree(newAcl);
-                    }
-                }
-                finally
-                {
-                    _ = LocalFree(securityDescriptor);
-                }
-            }
-            finally
-            {
-                _ = LocalFree(sidPtr);
+                var security = System.IO.File.GetAccessControl(path);
+                security.AddAccessRule(rule);
+                System.IO.File.SetAccessControl(path, security);
             }
         }
         catch (Exception ex) when (warnOnFailure)
@@ -265,59 +215,6 @@ internal static class ChromeLpacAccess
         }
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Trustee
-    {
-        public IntPtr MultipleTrustee;
-        public int MultipleTrusteeOperation;
-        public int TrusteeForm;
-        public int TrusteeType;
-        public IntPtr Name; // PSID when TrusteeForm is TRUSTEE_IS_SID
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct ExplicitAccess
-    {
-        public uint AccessPermissions;
-        public uint AccessMode;
-        public uint Inheritance;
-        public Trustee Trustee;
-    }
-
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern int GetNamedSecurityInfoW(
-        string objectName,
-        int objectType,
-        int securityInfo,
-        out IntPtr sidOwner,
-        out IntPtr sidGroup,
-        out IntPtr dacl,
-        out IntPtr sacl,
-        out IntPtr securityDescriptor);
-
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern int SetNamedSecurityInfoW(
-        string objectName,
-        int objectType,
-        int securityInfo,
-        IntPtr sidOwner,
-        IntPtr sidGroup,
-        IntPtr dacl,
-        IntPtr sacl);
-
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ConvertStringSidToSidW(
-        string stringSid,
-        out IntPtr sid);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern int SetEntriesInAclW(
-        int entryCount,
-        in ExplicitAccess entry,
-        IntPtr oldAcl,
-        out IntPtr newAcl);
-
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool QueryFullProcessImageNameW(
@@ -325,7 +222,4 @@ internal static class ChromeLpacAccess
         uint processNameFlags,
         StringBuilder exeName,
         ref uint size);
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr LocalFree(IntPtr memory);
 }
