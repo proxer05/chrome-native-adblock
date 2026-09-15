@@ -1,4 +1,7 @@
 using System.IO.Pipes;
+using System.IO.Pipes.AccessControl;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 
 namespace ChromeNativeAdblock.Launcher;
@@ -157,12 +160,37 @@ public sealed class LiveBlockMonitor : IDisposable, IAsyncDisposable
         {
             try
             {
-                var pipeServer = new NamedPipeServerStream(
+                // The block log is written by the native DLL inside Chrome's
+                // Network Service, which Chrome 155+ may run inside an LPAC
+                // AppContainer. AppContainer tokens are denied the default
+                // pipe DACL, so grant every Chrome network-sandbox capability
+                // (plus all application packages) write access explicitly.
+                var pipeSecurity = new PipeSecurity();
+                pipeSecurity.AddAccessRule(new PipeAccessRule(
+                    new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                    PipeAccessRights.ReadWrite,
+                    AccessControlType.Allow));
+                pipeSecurity.AddAccessRule(new PipeAccessRule(
+                    new SecurityIdentifier("S-1-15-2-1"), // ALL APPLICATION PACKAGES
+                    PipeAccessRights.ReadWrite,
+                    AccessControlType.Allow));
+                foreach (var capability in ChromeLpacAccess.NetworkSandboxCapabilityNames)
+                {
+                    pipeSecurity.AddAccessRule(new PipeAccessRule(
+                        new SecurityIdentifier(ChromeLpacAccess.CapabilitySidToSddl(capability)),
+                        PipeAccessRights.ReadWrite,
+                        AccessControlType.Allow));
+                }
+
+                var pipeServer = NamedPipeServerStreamAcl.Create(
                     ActivePipeName,
                     PipeDirection.In,
                     NamedPipeServerStream.MaxAllowedServerInstances,
                     PipeTransmissionMode.Byte,
-                    PipeOptions.Asynchronous);
+                    PipeOptions.Asynchronous,
+                    inBufferSize: 0,
+                    outBufferSize: 0,
+                    pipeSecurity);
 
                 await using (pipeServer.ConfigureAwait(false))
                 {

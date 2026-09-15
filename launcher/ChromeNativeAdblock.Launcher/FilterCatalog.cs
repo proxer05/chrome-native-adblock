@@ -61,7 +61,7 @@ public static class FilterCatalog
         new(CategoryBuiltin, "Category_Builtin", "Dựng sẵn / Built-in (uBlock)", "Category_Builtin_Desc", "Quy tắc cốt lõi uBlock Origin chống rủi ro mã độc, theo dõi và sửa lỗi web", "\uE74C", 1),
         new(CategoryAds, "Category_Ads", "Quảng cáo / Ads (EasyList)", "Category_Ads_Desc", "Chặn quảng cáo mạng, pop-up, video ads và banner tài trợ chuẩn EasyList", "\uE83D", 2),
         new(CategoryPrivacy, "Category_Privacy", "Riêng tư / Privacy (EasyPrivacy)", "Category_Privacy_Desc", "Bảo vệ quyền riêng tư, chặn theo dõi hành vi và telemetry", "\uEA18", 3),
-        new(CategoryRegions, "Category_Regions", "Khu vực / Regions (Việt Nam)", "Category_Regions_Desc", "Bộ lọc tối ưu hóa dành riêng cho các trang web và báo điện tử tại Việt Nam", "\uE774", 4)
+        new(CategoryRegions, "Category_Regions", "Khu vực / Regions (Việt Nam, Polska)", "Category_Regions_Desc", "Bộ lọc tối ưu hóa dành riêng cho các trang web theo từng quốc gia (Việt Nam, Ba Lan)", "\uE774", 4)
     };
 
     public static IReadOnlyList<FilterSubGroupDefinition> SubGroups { get; } = new List<FilterSubGroupDefinition>
@@ -93,7 +93,8 @@ public static class FilterCatalog
         // =========================================================================
         // 4. Khu vực / Regions (ABPVN - Việt Nam)
         // =========================================================================
-        new("reg-vn", CategoryRegions, null, "Filter_reg_vn_Name", "vn: ABPVN List", "Filter_reg_vn_Desc", "Bộ lọc tối ưu hóa dành riêng cho các trang web và báo điện tử tại Việt Nam", "https://raw.githubusercontent.com/abpvn/abpvn/master/filter/abpvn.txt", "abpvn_basic.txt", true, 30)
+        new("reg-vn", CategoryRegions, null, "Filter_reg_vn_Name", "vn: ABPVN List", "Filter_reg_vn_Desc", "Bộ lọc tối ưu hóa dành riêng cho các trang web và báo điện tử tại Việt Nam", "https://raw.githubusercontent.com/abpvn/abpvn/master/filter/abpvn.txt", "abpvn_basic.txt", true, 30),
+        new("reg-pl", CategoryRegions, null, "Filter_reg_pl_Name", "pl: Oficjalne Polskie Filtry", "Filter_reg_pl_Desc", "Polskie filtry przeglądarkowe (adblock.txt) cho các trang web và báo điện tử tại Ba Lan", "https://raw.githubusercontent.com/MajkiIT/polish-ads-filter/master/polish-adblock-filters/adblock.txt", "polish_adblock_filters.txt", true, 31)
     };
 
     public static IReadOnlyDictionary<string, FilterCategoryDefinition> CategoriesById { get; } =
@@ -108,7 +109,8 @@ public static class FilterCatalog
     public static IReadOnlySet<string> BasicPresetFilterIds { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "easylist",
-        "reg-vn"
+        "reg-vn",
+        "reg-pl"
     };
 
     public static IReadOnlySet<string> StandardPresetFilterIds { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -120,7 +122,8 @@ public static class FilterCatalog
         "ublock-unbreak",
         "easylist",
         "easyprivacy",
-        "reg-vn"
+        "reg-vn",
+        "reg-pl"
     };
 
     public static IReadOnlySet<string> AdvancedPresetFilterIds { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -132,7 +135,8 @@ public static class FilterCatalog
         "ublock-unbreak",
         "easylist",
         "easyprivacy",
-        "reg-vn"
+        "reg-vn",
+        "reg-pl"
     };
 
     public static IReadOnlySet<string> MaxPresetFilterIds { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -144,7 +148,8 @@ public static class FilterCatalog
         "ublock-unbreak",
         "easylist",
         "easyprivacy",
-        "reg-vn"
+        "reg-vn",
+        "reg-pl"
     };
 
     public static IReadOnlySet<string> GetFilterIdsForPreset(BlockingPreset preset) => preset switch

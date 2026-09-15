@@ -26,10 +26,10 @@ public sealed class FilterCatalogAndManagerTests
     }
 
     [Fact]
-    public void CatalogContainsAll8FilterItemsWithValidMetadata()
+    public void CatalogContainsAll9FilterItemsWithValidMetadata()
     {
-        // Total 8 items across 4 categories
-        Assert.Equal(8, FilterCatalog.Items.Count);
+        // Total 9 items across 4 categories
+        Assert.Equal(9, FilterCatalog.Items.Count);
 
         // Built-in category: 5 items (all in subgroup)
         var builtinItems = FilterCatalog.GetItemsForCategory(FilterCatalog.CategoryBuiltin);
@@ -43,8 +43,8 @@ public sealed class FilterCatalogAndManagerTests
         // Privacy category: 1 item (EasyPrivacy)
         Assert.Equal(1, FilterCatalog.GetItemsForCategory(FilterCatalog.CategoryPrivacy).Count);
 
-        // Regions category: 1 item (ABPVN)
-        Assert.Equal(1, FilterCatalog.GetItemsForCategory(FilterCatalog.CategoryRegions).Count);
+        // Regions category: 2 items (ABPVN, Polskie Filtry)
+        Assert.Equal(2, FilterCatalog.GetItemsForCategory(FilterCatalog.CategoryRegions).Count);
 
         // Check every item has URL, FallbackFileName, and valid metadata
         foreach (var item in FilterCatalog.Items)
@@ -63,9 +63,9 @@ public sealed class FilterCatalogAndManagerTests
     public void DefaultEnabledFiltersMatchSpecification()
     {
         var defaultEnabled = FilterCatalog.DefaultEnabledFilterIds;
-        // 8 default enabled filters:
-        // 5 uBlock built-ins + EasyList + EasyPrivacy + ABPVN (reg-vn)
-        Assert.Equal(8, defaultEnabled.Count);
+        // 9 default enabled filters:
+        // 5 uBlock built-ins + EasyList + EasyPrivacy + ABPVN (reg-vn) + Polskie Filtry (reg-pl)
+        Assert.Equal(9, defaultEnabled.Count);
 
         // Built-in (5)
         Assert.True(defaultEnabled.Contains("ublock-filters"));
@@ -80,8 +80,9 @@ public sealed class FilterCatalogAndManagerTests
         // Privacy (1)
         Assert.True(defaultEnabled.Contains("easyprivacy"));
 
-        // Regions (1)
+        // Regions (2)
         Assert.True(defaultEnabled.Contains("reg-vn"));
+        Assert.True(defaultEnabled.Contains("reg-pl"));
     }
 
     [Fact]
@@ -125,14 +126,14 @@ public sealed class FilterCatalogAndManagerTests
             Assert.Equal(true, manager.GetCategoryState(FilterCatalog.CategoryPrivacy));
 
             var regionsCatCounts = manager.GetCategoryCounts(FilterCatalog.CategoryRegions);
-            Assert.Equal(1, regionsCatCounts.EnabledCount);
-            Assert.Equal(1, regionsCatCounts.TotalCount);
+            Assert.Equal(2, regionsCatCounts.EnabledCount);
+            Assert.Equal(2, regionsCatCounts.TotalCount);
             Assert.Equal(true, manager.GetCategoryState(FilterCatalog.CategoryRegions));
 
             // Overall counts without cached files (0 rules until downloaded)
             var (totalEnabled, totalCount, totalRules) = manager.GetOverallCounts();
-            Assert.Equal(8, totalEnabled);
-            Assert.Equal(8, totalCount);
+            Assert.Equal(9, totalEnabled);
+            Assert.Equal(9, totalCount);
             Assert.Equal(0, totalRules);
 
             // Individual rule counts before download return null
@@ -365,9 +366,9 @@ public sealed class FilterCatalogAndManagerTests
             Assert.Equal(5, manager.GetRuleCount("easylist")); // 5 rules out of 8 lines (3 comments/headers)
 
             var (totalEnabled, totalCount, totalRules) = manager.GetOverallCounts();
-            Assert.Equal(8, totalEnabled);
+            Assert.Equal(9, totalEnabled);
             Assert.True(totalRules > 0);
-            Assert.Equal(40, totalRules); // 8 enabled * 5 rules each
+            Assert.Equal(45, totalRules); // 9 enabled * 5 rules each
         }
         finally
         {

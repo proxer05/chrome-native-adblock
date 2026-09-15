@@ -301,6 +301,8 @@ internal static class LocalizationService
                 ["Filter_reg_ua_Desc"] = "Bộ lọc quảng cáo cho các trang web tiếng Ukraina.",
                 ["Filter_reg_vn_Name"] = "vn: ABPVN List",
                 ["Filter_reg_vn_Desc"] = "Bộ lọc tối ưu hóa dành riêng cho các trang web và báo điện tử tại Việt Nam.",
+                ["Filter_reg_pl_Name"] = "pl: Oficjalne Polskie Filtry",
+                ["Filter_reg_pl_Desc"] = "Bộ lọc quảng cáo chính thức dành riêng cho các trang web và báo điện tử tại Ba Lan.",
 
                 // Legacy aliases
                 ["Filter_fanboy_cookiemonster_Name"] = "EasyList – Cookie Notices",
@@ -600,6 +602,8 @@ internal static class LocalizationService
                 ["Filter_reg_ua_Desc"] = "Ad-blocking filter for Ukrainian websites.",
                 ["Filter_reg_vn_Name"] = "vn: ABPVN List",
                 ["Filter_reg_vn_Desc"] = "Specialized ad-filtering list optimized for Vietnamese websites."
+                ["Filter_reg_pl_Name"] = "pl: Oficjalne Polskie Filtry",
+                ["Filter_reg_pl_Desc"] = "Official Polish ad-filtering list for Polish websites and news portals."
             },
             [Chinese] = new Dictionary<string, string>
             {
@@ -874,6 +878,8 @@ internal static class LocalizationService
                 ["Filter_reg_ua_Desc"] = "适用于乌克兰语网站的广告拦截规则。",
                 ["Filter_reg_vn_Name"] = "vn: ABPVN List",
                 ["Filter_reg_vn_Desc"] = "专为越南地区及越语新闻媒体网站定制的过滤规则。"
+                ["Filter_reg_pl_Name"] = "pl: Oficjalne Polskie Filtry",
+                ["Filter_reg_pl_Desc"] = "专为波兰地区及波兰语网站定制的官方过滤规则。"
             }
         };
 

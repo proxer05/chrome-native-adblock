@@ -153,6 +153,12 @@ internal static class InjectionSmoke
 
     private static RemoteInjectionResult Inject(uint processId, nint process, string dllPath, string filterPath, bool installHook)
     {
+        // Chrome 155+ may run the Network Service inside a per-channel LPAC
+        // (kNetworkServiceSandbox) whose token cannot read arbitrary build
+        // directories. Grant the capability read/execute access to the engine
+        // files before attempting the remote load; the sandbox itself stays on.
+        ChromeLpacAccess.GrantEngineAccess(processId, dllPath, filterPath);
+
         var remoteKernel32 = FindRemoteModule(processId, "kernel32.dll");
         var localKernel32 = NativeLibrary.Load("kernel32.dll");
         nint loadLibraryRva;
