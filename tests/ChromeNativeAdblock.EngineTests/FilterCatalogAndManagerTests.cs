@@ -422,20 +422,21 @@ public sealed class FilterCatalogAndManagerTests
     [Fact]
     public void PresetDefinitionsContainExactExpectedFilterIds()
     {
-        // 1. Basic (2 filters)
-        Assert.Equal(2, FilterCatalog.BasicPresetFilterIds.Count);
+        // 1. Basic (3 filters)
+        Assert.Equal(3, FilterCatalog.BasicPresetFilterIds.Count);
         Assert.True(FilterCatalog.BasicPresetFilterIds.Contains("easylist"));
         Assert.True(FilterCatalog.BasicPresetFilterIds.Contains("reg-vn"));
+        Assert.True(FilterCatalog.BasicPresetFilterIds.Contains("reg-pl"));
 
-        // 2. Standard (8 filters - matches defaults)
-        Assert.Equal(8, FilterCatalog.StandardPresetFilterIds.Count);
+        // 2. Standard (9 filters - matches defaults)
+        Assert.Equal(9, FilterCatalog.StandardPresetFilterIds.Count);
         Assert.True(FilterCatalog.StandardPresetFilterIds.SetEquals(FilterCatalog.DefaultEnabledFilterIds));
 
-        // 3. Advanced (8 filters)
-        Assert.Equal(8, FilterCatalog.AdvancedPresetFilterIds.Count);
+        // 3. Advanced (9 filters)
+        Assert.Equal(9, FilterCatalog.AdvancedPresetFilterIds.Count);
 
-        // 4. Max (8 filters)
-        Assert.Equal(8, FilterCatalog.MaxPresetFilterIds.Count);
+        // 4. Max (9 filters)
+        Assert.Equal(9, FilterCatalog.MaxPresetFilterIds.Count);
 
         // All preset filters exist in the catalog
         foreach (var id in FilterCatalog.MaxPresetFilterIds)
@@ -469,12 +470,12 @@ public sealed class FilterCatalogAndManagerTests
 
             // Default should be Standard preset
             Assert.Equal(BlockingPreset.Standard, manager.GetCurrentPreset());
-            Assert.Equal(8, manager.EnabledFilterIds.Count);
+            Assert.Equal(9, manager.EnabledFilterIds.Count);
 
             // 1. Switch to Basic
             manager.ApplyPresetFast(BlockingPreset.Basic);
             Assert.Equal(BlockingPreset.Basic, manager.GetCurrentPreset());
-            Assert.Equal(2, manager.EnabledFilterIds.Count);
+            Assert.Equal(3, manager.EnabledFilterIds.Count);
             Assert.True(manager.IsFilterEnabled("easylist"));
             Assert.True(manager.IsFilterEnabled("reg-vn"));
             Assert.False(manager.IsFilterEnabled("ublock-filters"));
@@ -482,18 +483,18 @@ public sealed class FilterCatalogAndManagerTests
             // 2. Custom detection when user manually toggles an individual filter
             manager.SetFilterEnabled("ublock-filters", true);
             Assert.Equal(BlockingPreset.Custom, manager.GetCurrentPreset());
-            Assert.Equal(3, manager.EnabledFilterIds.Count);
+            Assert.Equal(4, manager.EnabledFilterIds.Count);
 
             // 3. Test Async application & merge
             await manager.ApplyPresetAsync(BlockingPreset.Standard);
             Assert.Equal(BlockingPreset.Standard, manager.GetCurrentPreset());
-            Assert.Equal(8, manager.EnabledFilterIds.Count);
+            Assert.Equal(9, manager.EnabledFilterIds.Count);
             Assert.True(File.Exists(manager.CombinedRulesPath));
 
             // 4. Test Settings Persistence & Reload
             var reloadedManager = new FilterManager(filtersDir, settingsFile, httpClient);
             Assert.Equal(BlockingPreset.Standard, reloadedManager.GetCurrentPreset());
-            Assert.Equal(8, reloadedManager.EnabledFilterIds.Count);
+            Assert.Equal(9, reloadedManager.EnabledFilterIds.Count);
         }
         finally
         {
