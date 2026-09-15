@@ -173,15 +173,17 @@ internal static class ChromeLpacAccess
 
             if (isDirectory)
             {
-                var security = System.IO.Directory.GetAccessControl(path);
+                var info = new System.IO.DirectoryInfo(path);
+                var security = info.GetAccessControl();
                 security.AddAccessRule(rule);
-                System.IO.Directory.SetAccessControl(path, security);
+                info.SetAccessControl(security);
             }
             else
             {
-                var security = System.IO.File.GetAccessControl(path);
+                var info = new System.IO.FileInfo(path);
+                var security = info.GetAccessControl();
                 security.AddAccessRule(rule);
-                System.IO.File.SetAccessControl(path, security);
+                info.SetAccessControl(security);
             }
         }
         catch (Exception ex) when (warnOnFailure)
