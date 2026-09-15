@@ -20,6 +20,12 @@ internal static class ChromeLpacAccess
     private const string CanaryCapability = "lpacChromeCanaryNetworkSandbox";
     private const string UnknownChannelCapability = "lpacChromeNetworkSandbox";
 
+    // Present in every plain AppContainer token. The network service runs as a
+    // plain AppContainer when the LPAC variant of the sandbox is off, in which
+    // case the per-channel capability SIDs are not in the token and only this
+    // SID (or a listed well-known capability) can match an ACE.
+    private const string AllApplicationPackagesSid = "S-1-15-2-1";
+
     /// <summary>Every Chrome network-sandbox capability name, one per channel.</summary>
     internal static IReadOnlyList<string> NetworkSandboxCapabilityNames { get; } =
     [
@@ -134,6 +140,9 @@ internal static class ChromeLpacAccess
         {
             TryGrant(path, isDirectory, CapabilitySidToSddl(capabilityName), capabilityName, warnOnFailure);
         }
+
+        // Covers the plain (non-LPAC) AppContainer case.
+        TryGrant(path, isDirectory, AllApplicationPackagesSid, "ALL APPLICATION PACKAGES", warnOnFailure);
     }
 
     /// <summary>

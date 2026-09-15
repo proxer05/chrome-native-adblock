@@ -172,7 +172,15 @@ internal static class InjectionSmoke
         }
 
         using var remoteDllPath = RemoteAllocation.WriteUtf16(process, dllPath);
-        RunRemoteThread(process, remoteKernel32.BaseAddress + loadLibraryRva, remoteDllPath.Address, "LoadLibraryW");
+        var loadLibraryResult = RunRemoteThread(
+            process, remoteKernel32.BaseAddress + loadLibraryRva, remoteDllPath.Address, "LoadLibraryW");
+        if (loadLibraryResult == 0)
+        {
+            throw new InvalidOperationException(
+                $"Remote LoadLibraryW of '{dllPath}' returned 0 (load rejected by the target process). " +
+                DescribeInjectionTarget(processId, process));
+        }
+
         var remoteDll = FindRemoteModule(processId, Path.GetFileName(dllPath));
 
         var localDll = NativeLibrary.Load(dllPath);
@@ -245,9 +253,45 @@ internal static class InjectionSmoke
             resolutionModeStr);
     }
 
-    private static uint RunRemoteThread(nint process, nint startAddress, nint parameter, string operation)
+    /// <summary>
+    /// Diagnostics for a rejected remote load: the target's command line and the
+    /// process-mitigation policies that commonly block DLL injection (binary
+    /// signature policy, dynamic-code policy, image-load policy).
+    /// </summary>
+    private static string DescribeInjectionTarget(uint processId, nint process)
     {
-        var thread = NativeMethods.CreateRemoteThread(process, 0, 0, startAddress, parameter, 0, out _);
+        var commandLine = ChromeProcesses.TryReadCommandLine(processId) ?? "<unavailable>";
+        return $"Target command line: [{commandLine}]. " +
+               $"SignaturePolicy=0x{ReadMitigationPolicy(process, 8):X8}, " +
+               $"DynamicCodePolicy=0x{ReadMitigationPolicy(process, 2):X8}, " +
+               $"ImageLoadPolicy=0x{ReadMitigationPolicy(process, 10):X8}.";
+    }
+
+    private static uint ReadMitigationPolicy(nint process, int policy)
+    {
+        try
+        {
+            var buffer = new byte[4];
+            return GetProcessMitigationPolicy(process, policy, buffer, (nuint)buffer.Length)
+                ? BitConverter.ToUInt32(buffer, 0)
+                : 0xDEAD;
+        }
+        catch (Exception)
+        {
+            return 0xDEAD;
+        }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessMitigationPolicy(
+        nint process,
+        int policy,
+        byte[] buffer,
+        nuint length);
+
+    private static uint RunRemoteThread(nint process, nint startAddress, nint parameter, string operation)
+    {        var thread = NativeMethods.CreateRemoteThread(process, 0, 0, startAddress, parameter, 0, out _);
         if (thread == 0)
         {
             throw NativeMethods.Error($"CreateRemoteThread failed for {operation}");
