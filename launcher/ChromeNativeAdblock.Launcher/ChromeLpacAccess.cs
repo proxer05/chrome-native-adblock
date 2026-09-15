@@ -160,7 +160,7 @@ internal static class ChromeLpacAccess
     private const int SeFileObject = 1;
     private const int DaclSecurityInformation = 4;
     private const uint GrantAccess = 1;
-    private const int TrusteeIsName = 1;
+    private const int TrusteeIsSid = 4;
     private const uint GenericRead = 0x80000000;
     private const uint GenericExecute = 0x20000000;
     // FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE for ancestor directories:
@@ -171,52 +171,67 @@ internal static class ChromeLpacAccess
     {
         try
         {
-            var entry = new ExplicitAccess
+            // ConvertStringSidToSidW turns the S-1-15-3-1024-... string into the
+            // real SID; LookupAccountName (used for TRUSTEE_IS_NAME trustees)
+            // cannot resolve SDDL strings and fails with ERROR_NONE_MAPPED.
+            if (!ConvertStringSidToSidW(sid, out var sidPtr))
             {
-                AccessPermissions = isDirectory ? DirectoryTraversal : GenericRead | GenericExecute,
-                AccessMode = GrantAccess,
-                Inheritance = 0,
-                Trustee = new Trustee
-                {
-                    TrusteeForm = TrusteeIsName,
-                    Name = sid
-                }
-            };
-
-            var result = GetNamedSecurityInfoW(
-                path, SeFileObject, DaclSecurityInformation,
-                out _, out _, out var dacl, out _, out var securityDescriptor);
-            if (result != 0)
-            {
-                throw new InvalidOperationException($"GetNamedSecurityInfo failed with 0x{result:X8}");
+                throw new InvalidOperationException($"ConvertStringSidToSid failed with 0x{Marshal.GetLastWin32Error():X8}");
             }
 
             try
             {
-                result = SetEntriesInAclW(1, in entry, dacl, out var newAcl);
+                var entry = new ExplicitAccess
+                {
+                    AccessPermissions = isDirectory ? DirectoryTraversal : GenericRead | GenericExecute,
+                    AccessMode = GrantAccess,
+                    Inheritance = 0,
+                    Trustee = new Trustee
+                    {
+                        TrusteeForm = TrusteeIsSid,
+                        Name = sidPtr
+                    }
+                };
+
+                var result = GetNamedSecurityInfoW(
+                    path, SeFileObject, DaclSecurityInformation,
+                    out _, out _, out var dacl, out _, out var securityDescriptor);
                 if (result != 0)
                 {
-                    throw new InvalidOperationException($"SetEntriesInAcl failed with 0x{result:X8}");
+                    throw new InvalidOperationException($"GetNamedSecurityInfo failed with 0x{result:X8}");
                 }
 
                 try
                 {
-                    result = SetNamedSecurityInfoW(
-                        path, SeFileObject, DaclSecurityInformation,
-                        IntPtr.Zero, IntPtr.Zero, newAcl, IntPtr.Zero);
+                    result = SetEntriesInAclW(1, in entry, dacl, out var newAcl);
                     if (result != 0)
                     {
-                        throw new InvalidOperationException($"SetNamedSecurityInfo failed with 0x{result:X8}");
+                        throw new InvalidOperationException($"SetEntriesInAcl failed with 0x{result:X8}");
+                    }
+
+                    try
+                    {
+                        result = SetNamedSecurityInfoW(
+                            path, SeFileObject, DaclSecurityInformation,
+                            IntPtr.Zero, IntPtr.Zero, newAcl, IntPtr.Zero);
+                        if (result != 0)
+                        {
+                            throw new InvalidOperationException($"SetNamedSecurityInfo failed with 0x{result:X8}");
+                        }
+                    }
+                    finally
+                    {
+                        _ = LocalFree(newAcl);
                     }
                 }
                 finally
                 {
-                    _ = LocalFree(newAcl);
+                    _ = LocalFree(securityDescriptor);
                 }
             }
             finally
             {
-                _ = LocalFree(securityDescriptor);
+                _ = LocalFree(sidPtr);
             }
         }
         catch (Exception ex) when (warnOnFailure)
@@ -250,14 +265,14 @@ internal static class ChromeLpacAccess
         }
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    [StructLayout(LayoutKind.Sequential)]
     private struct Trustee
     {
         public IntPtr MultipleTrustee;
         public int MultipleTrusteeOperation;
         public int TrusteeForm;
         public int TrusteeType;
-        public string Name;
+        public IntPtr Name; // PSID when TrusteeForm is TRUSTEE_IS_SID
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -289,6 +304,12 @@ internal static class ChromeLpacAccess
         IntPtr sidGroup,
         IntPtr dacl,
         IntPtr sacl);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ConvertStringSidToSidW(
+        string stringSid,
+        out IntPtr sid);
 
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern int SetEntriesInAclW(
