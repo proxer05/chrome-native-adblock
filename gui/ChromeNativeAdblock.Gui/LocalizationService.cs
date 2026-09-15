@@ -303,6 +303,12 @@ internal static class LocalizationService
                 ["Filter_reg_vn_Desc"] = "Bộ lọc tối ưu hóa dành riêng cho các trang web và báo điện tử tại Việt Nam.",
                 ["Filter_reg_pl_Name"] = "pl: Oficjalne Polskie Filtry",
                 ["Filter_reg_pl_Desc"] = "Bộ lọc quảng cáo chính thức dành riêng cho các trang web và báo điện tử tại Ba Lan.",
+                ["ProfileModeLabel"] = "Hồ sơ Chrome / Profile",
+                ["ProfileMode_Managed"] = "Hồ sơ riêng (Khuyên dùng)",
+                ["ProfileMode_ManagedNote"] = "Hồ sơ riêng tại %LOCALAPPDATA%\\ChromeNativeAdblock\\Profile. Đầy đủ tính năng, kể cả chặn cosmetic (CDP) và console trực tiếp.",
+                ["ProfileMode_Real"] = "Hồ sơ Chrome gốc của tôi (giữ đăng nhập)",
+                ["ProfileMode_RealNote"] = "Chrome 136+ chặn remote debugging trên hồ sơ gốc: chặn cosmetic và console trực tiếp sẽ không chạy, nhưng chặn quảng cáo mạng và MV2 vẫn hoạt động. Hồ sơ gốc sẽ được MV2 repair chỉnh sửa.",
+                ["ProfileMode_RealMissingNote"] = "Không tìm thấy hồ sơ gốc: ",
 
                 // Legacy aliases
                 ["Filter_fanboy_cookiemonster_Name"] = "EasyList – Cookie Notices",
@@ -601,9 +607,15 @@ internal static class LocalizationService
                 ["Filter_reg_ua_Name"] = "ua: AdGuard Ukrainian",
                 ["Filter_reg_ua_Desc"] = "Ad-blocking filter for Ukrainian websites.",
                 ["Filter_reg_vn_Name"] = "vn: ABPVN List",
-                ["Filter_reg_vn_Desc"] = "Specialized ad-filtering list optimized for Vietnamese websites."
+                ["Filter_reg_vn_Desc"] = "Specialized ad-filtering list optimized for Vietnamese websites.",
                 ["Filter_reg_pl_Name"] = "pl: Oficjalne Polskie Filtry",
-                ["Filter_reg_pl_Desc"] = "Official Polish ad-filtering list for Polish websites and news portals."
+                ["Filter_reg_pl_Desc"] = "Official Polish ad-filtering list for Polish websites and news portals.",
+                ["ProfileModeLabel"] = "Chrome profile",
+                ["ProfileMode_Managed"] = "Dedicated profile (recommended)",
+                ["ProfileMode_ManagedNote"] = "Uses the dedicated %LOCALAPPDATA%\\ChromeNativeAdblock\\Profile. Every feature is active, including cosmetic filtering (CDP) and the live console.",
+                ["ProfileMode_Real"] = "My original Chrome profile (keeps logins)",
+                ["ProfileMode_RealNote"] = "Chrome 136+ blocks remote debugging on the original profile: cosmetic filtering and the live console will not run; network ad blocking and MV2 stay active. The MV2 repair modifies this profile.",
+                ["ProfileMode_RealMissingNote"] = "Original profile not found: ",
             },
             [Chinese] = new Dictionary<string, string>
             {
@@ -877,9 +889,15 @@ internal static class LocalizationService
                 ["Filter_reg_ua_Name"] = "ua: AdGuard Ukrainian",
                 ["Filter_reg_ua_Desc"] = "适用于乌克兰语网站的广告拦截规则。",
                 ["Filter_reg_vn_Name"] = "vn: ABPVN List",
-                ["Filter_reg_vn_Desc"] = "专为越南地区及越语新闻媒体网站定制的过滤规则。"
+                ["Filter_reg_vn_Desc"] = "专为越南地区及越语新闻媒体网站定制的过滤规则。",
                 ["Filter_reg_pl_Name"] = "pl: Oficjalne Polskie Filtry",
-                ["Filter_reg_pl_Desc"] = "专为波兰地区及波兰语网站定制的官方过滤规则。"
+                ["Filter_reg_pl_Desc"] = "专为波兰地区及波兰语网站定制的官方过滤规则。",
+                ["ProfileModeLabel"] = "Chrome 配置文件",
+                ["ProfileMode_Managed"] = "专用配置文件（推荐）",
+                ["ProfileMode_ManagedNote"] = "使用专用配置文件 %LOCALAPPDATA%\\ChromeNativeAdblock\\Profile。所有功能可用，包括外观过滤（CDP）与实时控制台。",
+                ["ProfileMode_Real"] = "我的原始 Chrome 配置文件（保留登录）",
+                ["ProfileMode_RealNote"] = "Chrome 136+ 禁止在原始配置文件上远程调试：外观过滤与实时控制台不可用；网络广告拦截与 MV2 仍正常。MV2 修复会修改该配置文件。",
+                ["ProfileMode_RealMissingNote"] = "未找到原始配置文件： ",
             }
         };
 

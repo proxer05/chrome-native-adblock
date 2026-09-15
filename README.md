@@ -58,7 +58,12 @@ the archive, and run `ChromeNativeAdblock.Gui.exe`.
 
 The GUI and CLI use a separate Chrome profile by default. Existing bookmarks,
 cookies, and extensions from the normal Chrome profile are intentionally not
-copied.
+copied. To browse with your existing logins, the GUI has a profile selector
+(dedicated profile vs. your original Chrome profile) and the CLI accepts
+Chrome's standard `--user-data-dir=...` argument. Note that Chrome 136+
+blocks remote debugging on a channel's default user data directory, so
+cosmetic filtering and the live console only run with the dedicated profile
+(or a copy of your profile placed at a non-default path).
 
 ## Build and test
 

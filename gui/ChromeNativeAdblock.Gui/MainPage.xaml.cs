@@ -51,7 +51,14 @@ public sealed partial class MainPage : Page
     private AnalysisReport? _analysis;
     private bool _busy;
     private bool _isRunning;
+    private bool _profileUiReady;
+    private string _profileMode = "managed"; // "managed" or "real"
     private CancellationTokenSource? _cts;
+
+    private static readonly string ProfileModeSettingsPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ChromeNativeAdblock",
+        "profile-mode.txt");
 
     private long _blockedCount;
     private long _ytBypassCount;
@@ -97,12 +104,22 @@ public sealed partial class MainPage : Page
             BuildFilterListUi();
             SelectCurrentLanguage();
             ApplyLanguage();
+            InitializeProfileMode();
             await AnalyzeAsync();
         }
         catch (Exception ex)
         {
             Program.LogFatal("MainPage.MainPage_Loaded", ex);
             ShowMessage(InfoBarSeverity.Error, "Initialization Error", ex.Message);
+        }
+    }
+
+    private void LanguageComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (LanguageComboBox?.SelectedItem is ComboBoxItem item && item.Tag is string lang)
+        {
+            LocalizationService.SetLanguage(lang);
+            ApplyLanguage();
         }
     }
 
@@ -119,12 +136,120 @@ public sealed partial class MainPage : Page
         MainWindow.Current?.MinimizeToTray();
     }
 
-    private void LanguageComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void ProfileComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (LanguageComboBox?.SelectedItem is ComboBoxItem item && item.Tag is string lang)
+        if (!_profileUiReady)
         {
-            LocalizationService.SetLanguage(lang);
-            ApplyLanguage();
+            return;
+        }
+
+        if (ProfileComboBox?.SelectedItem is ComboBoxItem item && item.Tag is string mode)
+        {
+            _profileMode = mode;
+            SaveProfileMode();
+            UpdateProfileTexts();
+        }
+    }
+
+    private void InitializeProfileMode()
+    {
+        try
+        {
+            if (File.Exists(ProfileModeSettingsPath))
+            {
+                var saved = File.ReadAllText(ProfileModeSettingsPath).Trim();
+                if (saved is "managed" or "real")
+                {
+                    _profileMode = saved;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Fall back to the dedicated profile.
+        }
+
+        ProfileComboBox.SelectedItem = _profileMode == "real" ? ProfileRealItem : ProfileManagedItem;
+        _profileUiReady = true;
+        UpdateProfileTexts();
+    }
+
+    private void SaveProfileMode()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ProfileModeSettingsPath)!);
+            File.WriteAllText(ProfileModeSettingsPath, _profileMode);
+        }
+        catch (Exception)
+        {
+            // Non-fatal: the selection still applies to this session.
+        }
+    }
+
+    /// <summary>
+    /// Derives the original user data directory of the detected Chrome channel
+    /// (e.g. %LOCALAPPDATA%\Google\Chrome Dev\User Data) from its executable path.
+    /// </summary>
+    private string? GetOriginalUserDataDirPath()
+    {
+        if (_installation == null)
+        {
+            return null;
+        }
+
+        var normalized = _installation.ExecutablePath.Replace('/', '\\');
+        var marker = normalized.IndexOf("\\Google\\", StringComparison.OrdinalIgnoreCase);
+        if (marker < 0)
+        {
+            return null;
+        }
+
+        var afterGoogle = marker + "\\Google\\".Length;
+        var application = normalized.IndexOf("\\Application\\", afterGoogle, StringComparison.OrdinalIgnoreCase);
+        if (application < 0)
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Google", normalized[afterGoogle..application], "User Data");
+    }
+
+    private string GetSelectedUserDataDir()
+    {
+        if (_profileMode == "real" && GetOriginalUserDataDirPath() is { } realDir && Directory.Exists(realDir))
+        {
+            return realDir;
+        }
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ChromeNativeAdblock", "Profile");
+    }
+
+    private void UpdateProfileTexts()
+    {
+        if (ProfileModeLabelText == null || ProfileComboBox == null)
+        {
+            return;
+        }
+
+        ProfileModeLabelText.Text = T("ProfileModeLabel");
+        ProfileManagedItem.Content = T("ProfileMode_Managed");
+        ProfileRealItem.Content = T("ProfileMode_Real");
+
+        if (_profileMode == "real")
+        {
+            var realDir = GetOriginalUserDataDirPath();
+            ProfileNoteText.Text = realDir != null && Directory.Exists(realDir)
+                ? $"{T("ProfileMode_RealNote")}\n{realDir}"
+                : $"{T("ProfileMode_RealMissingNote")}{realDir ?? "?"}";
+        }
+        else
+        {
+            ProfileNoteText.Text = T("ProfileMode_ManagedNote");
         }
     }
 
@@ -1072,6 +1197,7 @@ public sealed partial class MainPage : Page
             ChromeVersionText.Text = $"{T("ChromeVersionLabel")} {_installation.Version}";
             ChromePathText.Text = _installation.ExecutablePath;
             LaunchButton.IsEnabled = true;
+            UpdateProfileTexts();
 
             DetailsTextBox.Text = FormatReport(_analysis);
         }
@@ -1130,9 +1256,19 @@ public sealed partial class MainPage : Page
         AppendLog($"=== {T("HeroTitle")} - Session Started at {DateTime.Now:HH:mm:ss} ===");
         AppendLog($"Options: Native Adblock = {nativeAdblock}, MV2 Enabler = {mv2Enabler}, Auto-Update = {autoUpdate}");
 
+        // Only pass a user data dir when the user explicitly picked the original
+        // Chrome profile; otherwise the supervisor uses its dedicated profile.
+        var realProfileDir = _profileMode == "real" ? GetOriginalUserDataDirPath() : null;
+        var userDataDir = realProfileDir != null && Directory.Exists(realProfileDir) ? realProfileDir : null;
+        if (userDataDir != null)
+        {
+            AppendLog($"Profile: original Chrome profile ({userDataDir}) - cosmetic/CDP features limited by Chrome's debugging policy.");
+        }
+
         var options = new ChromeSupervisorOptions(
             ChromePath: _installation.ExecutablePath,
             FilterPath: _filterManager.GetActiveCombinedFilterPath(),
+            UserDataDir: userDataDir,
             EnableNativeAdblock: nativeAdblock,
             EnableMv2Enabler: mv2Enabler,
             AutoUpdateFilters: autoUpdate,
@@ -1323,6 +1459,7 @@ public sealed partial class MainPage : Page
         }
         UpdateLaunchButtonText();
         RefreshFilterListUi();
+        UpdateProfileTexts();
 
         if (_analysis != null && DetailsTextBox != null)
         {
