@@ -88,6 +88,7 @@ public sealed class PatternScanTests
             [
                 @"C:\Program Files\Google\Chrome\Application\152.0.7977.65\chrome.dll",
                 @"C:\Program Files (x86)\Google\Chrome\Application\152.0.7977.65\chrome.dll",
+                @"C:\Program Files (x86)\Google\Chrome Dev\Application\155.0.8048.0\chrome.dll",
             ];
             foreach (var cand in directCandidates)
             {
@@ -105,10 +106,21 @@ public sealed class PatternScanTests
             using var engine = new NativeEngine(dllPath);
             var (startRva, cancelRva) = engine.ScanChromeDllFile(chromeDll);
 
+            var is80480 = chromeDll.Contains("155.0.8048.0", StringComparison.OrdinalIgnoreCase);
             var is801037 = chromeDll.Contains("153.0.8010.37", StringComparison.OrdinalIgnoreCase);
             var is797776 = chromeDll.Contains("152.0.7977.76", StringComparison.OrdinalIgnoreCase);
-            Assert.Equal(is801037 ? (nuint)0x09256B0 : is797776 ? (nuint)0x099D910 : (nuint)0x08BE450, startRva);
-            Assert.Equal(is801037 ? (nuint)0x0A85B640 : is797776 ? (nuint)0x0A5AFD00 : (nuint)0x0A5A09C0, cancelRva);
+            Assert.Equal(
+                is80480 ? (nuint)0x0886AA0
+                : is801037 ? (nuint)0x09256B0
+                : is797776 ? (nuint)0x099D910
+                : (nuint)0x08BE450,
+                startRva);
+            Assert.Equal(
+                is80480 ? (nuint)0x0AA62550
+                : is801037 ? (nuint)0x0A85B640
+                : is797776 ? (nuint)0x0A5AFD00
+                : (nuint)0x0A5A09C0,
+                cancelRva);
         }
     }
 
@@ -132,7 +144,12 @@ public sealed class PatternScanTests
             var result = PatternScanSmoke.Run(chromeExe, dllPath);
 
             Assert.True(result.Success);
-            if (result.ChromeVersion == "153.0.8010.37")
+            if (result.ChromeVersion == "155.0.8048.0")
+            {
+                Assert.Equal("0x886AA0", result.StartRva);
+                Assert.Equal("0xAA62550", result.CancelRva);
+            }
+            else if (result.ChromeVersion == "153.0.8010.37")
             {
                 Assert.Equal("0x9256B0", result.StartRva);
                 Assert.Equal("0xA85B640", result.CancelRva);
@@ -160,6 +177,7 @@ public sealed class PatternScanTests
             (@"C:\Program Files\Google\Chrome\Application\153.0.8010.37\chrome.dll", 0x09256B0, 0x0A85B640),
             (@"C:\Program Files\Google\Chrome\Application\152.0.7977.65\chrome.dll", 0x08BE450, 0x0A5A09C0),
             (@"C:\Program Files\Google\Chrome\Application\152.0.7977.76\chrome.dll", 0x099D910, 0x0A5AFD00),
+            (@"C:\Program Files (x86)\Google\Chrome Dev\Application\155.0.8048.0\chrome.dll", 0x0886AA0, 0x0AA62550),
             (@"C:\Program Files\CocCoc\Browser\Application\151.0.7922.176\browser.dll", 0x08BE1B0, 0x0AAF6950),
             (@"C:\Program Files\BraveSoftware\Brave-Browser\Application\152.1.94.117\chrome.dll", 0x0992CA0, 0x0B98EEC0),
             (Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"ms-playwright\chromium-1223\chrome-win64\chrome.dll"), 0x09BE170, 0x09D53BD0),

@@ -59,6 +59,26 @@ public static class Mv2GateLocator
         "80 BF 08 02 00 00 00 75 ?? 8B 49 68 83 F9 01 0F 85 ?? ?? ?? ?? " +
         "83 F8 05 74 ?? 83 F8 0A 74 ?? 4C 8D B4 24 80 00 00 00 " +
         "4C 89 F1 BA 95 1F 00 00");
+    // Chrome 155 moved Manifest::location_ to +0x50 and Manifest::type_ to +0x88
+    // (both +0x20 from the 152/153 layout) and localized resource 8118.
+    private static readonly BytePattern SplitEntryV7Pattern = BytePattern.Parse(
+        "83 7A 50 02 ?? ?? 48 8B 8A 28 02 00 00 8B 41 50 " +
+        "80 BA 08 02 00 00 00 75 ?? 8B 89 88 00 00 00 83 " +
+        "F9 01 75 ?? 83 F8 05 0F 95 C1 83 F8 0A 0F 95 C0 " +
+        "20 C8 C3 83 F9 08 74 ?? 83 F9 03 74 ?? 31 C0 EB ?? CC CC");
+    private static readonly BytePattern MustRemainDisabledV7Pattern = BytePattern.Parse(
+        "83 7F 50 02 0F 8F ?? ?? ?? ?? 48 8B 8F 28 02 00 00 8B 41 50 " +
+        "80 BF 08 02 00 00 00 75 ?? 8B 89 88 00 00 00 83 F9 01 75 ?? 31 FF " +
+        "83 F8 05 74 ?? 83 F8 0A 75 ??");
+    private static readonly BytePattern ReEnableV7Pattern = BytePattern.Parse(
+        "83 7E 50 02 ?? ?? 48 8B 8E 28 02 00 00 8B 41 50 " +
+        "80 BE 08 02 00 00 00 75 ?? 8B 89 88 00 00 00 83 F9 01 75 ?? " +
+        "83 F8 0A 74 ?? 83 F8 05 74 ?? 48 83 C4 20 5B 5F 5E C3");
+    private static readonly BytePattern UserMayInstallV7Pattern = BytePattern.Parse(
+        "83 7F 50 02 ?? ?? 48 8B 8F 28 02 00 00 8B 41 50 " +
+        "80 BF 08 02 00 00 00 75 ?? 8B 89 88 00 00 00 83 F9 01 0F 85 ?? ?? ?? ?? " +
+        "83 F8 05 74 ?? 83 F8 0A 74 ?? 4C 8D B4 24 80 00 00 00 " +
+        "4C 89 F1 BA B6 1F 00 00");
     private static readonly BytePattern EntryPattern = BytePattern.Parse(
         "83 7A 50 02 ?? ?? 48 8B 8A 28 02 00 00 8B 41 30 " +
         "80 BA 08 02 00 00 00 75 ?? 8B 49 68 83 F9 01 75 ?? " +
@@ -211,7 +231,31 @@ public static class Mv2GateLocator
     private static LocatorResult LocateSplit(PeImage image, PeSection text, ReadOnlySpan<byte> sectionBytes)
     {
         var diagnostics = new List<string>();
-        var relativeMatches = SplitEntryPattern.FindAll(sectionBytes);
+
+        // The generation is identified by the UserMayInstall clone's localized
+        // resource id: 8118 = Chrome 155, 8085 = Chrome 153, 8115 = Chrome 152.
+        var userMayInstallV7Matches = UserMayInstallV7Pattern.FindAll(sectionBytes);
+        var userMayInstallV6Matches = UserMayInstallV6Pattern.FindAll(sectionBytes);
+        var generation = userMayInstallV7Matches.Count == 1
+            ? 7
+            : userMayInstallV6Matches.Count == 1
+                ? 6
+                : 5;
+        var chromeVersionLabel = generation switch
+        {
+            7 => "Chrome 155",
+            6 => "Chrome 153",
+            _ => "Chrome 152",
+        };
+        var splitEntryPattern = generation == 7 ? SplitEntryV7Pattern : SplitEntryPattern;
+        var userMayInstallMatches = generation switch
+        {
+            7 => userMayInstallV7Matches,
+            6 => userMayInstallV6Matches,
+            _ => UserMayInstallV5Pattern.FindAll(sectionBytes),
+        };
+
+        var relativeMatches = splitEntryPattern.FindAll(sectionBytes);
         var valid = new List<(int RawOffset, IReadOnlyList<string> Evidence)>();
 
         foreach (var relative in relativeMatches)
@@ -267,12 +311,10 @@ public static class Mv2GateLocator
         var integerPatchRawOffset = integerRawOffset + 5;
         var integerCurrent = image.Bytes[integerPatchRawOffset];
 
-        var mustRemainDisabledMatches = MustRemainDisabledV5Pattern.FindAll(sectionBytes);
-        var reEnableMatches = ReEnableV5Pattern.FindAll(sectionBytes);
-        var userMayInstallV6Matches = UserMayInstallV6Pattern.FindAll(sectionBytes);
-        var isV6 = userMayInstallV6Matches.Count == 1;
-        var userMayInstallMatches = isV6 ? userMayInstallV6Matches : UserMayInstallV5Pattern.FindAll(sectionBytes);
-        var chromeVersionLabel = isV6 ? "Chrome 153" : "Chrome 152";
+        var mustRemainDisabledPattern = generation == 7 ? MustRemainDisabledV7Pattern : MustRemainDisabledV5Pattern;
+        var reEnablePattern = generation == 7 ? ReEnableV7Pattern : ReEnableV5Pattern;
+        var mustRemainDisabledMatches = mustRemainDisabledPattern.FindAll(sectionBytes);
+        var reEnableMatches = reEnablePattern.FindAll(sectionBytes);
 
         if (mustRemainDisabledMatches.Count != 1 ||
             reEnableMatches.Count != 1 ||
@@ -309,7 +351,7 @@ public static class Mv2GateLocator
             return new LocatorResult(false, null, relativeMatches.Count, valid.Count, diagnostics);
         }
 
-        var expectedResourceId = isV6 ? 8085 : 8115;
+        var expectedResourceId = generation switch { 7 => 8118, 6 => 8085, _ => 8115 };
         if (!TryValidateUserMayInstallBranch(
                 image.Bytes,
                 text,
@@ -322,8 +364,8 @@ public static class Mv2GateLocator
             return new LocatorResult(false, null, relativeMatches.Count, valid.Count, diagnostics);
         }
 
-        var startupDisableBranchPattern = isV6 ? StartupDisableBranchV6Pattern : StartupDisableBranchV5Pattern;
-        var startupDisableTargetPattern = isV6 ? StartupDisableTargetV6Pattern : StartupDisableTargetV5Pattern;
+        var startupDisableBranchPattern = generation >= 6 ? StartupDisableBranchV6Pattern : StartupDisableBranchV5Pattern;
+        var startupDisableTargetPattern = generation >= 6 ? StartupDisableTargetV6Pattern : StartupDisableTargetV5Pattern;
         var startupDisableBranchMatches = startupDisableBranchPattern.FindAll(sectionBytes);
         if (startupDisableBranchMatches.Count != 1)
         {
@@ -400,12 +442,18 @@ public static class Mv2GateLocator
             return new LocatorResult(false, null, relativeMatches.Count, valid.Count, diagnostics);
         }
 
-        var ruleId = isV6
-            ? "chromium.mv2-impact-checker.split-extension-copies.return-unaffected.v6"
-            : "chromium.mv2-impact-checker.split-extension-copies.return-unaffected.v5";
-        var description = isV6
-            ? "Force both Chrome 153 MV2 impact-checker copies to take the unaffected path and neutralize the verified startup disable branch."
-            : "Force both Chrome 152 MV2 impact-checker copies to take the unaffected path and neutralize the verified startup disable branch.";
+        var ruleId = generation switch
+        {
+            7 => "chromium.mv2-impact-checker.split-extension-copies.return-unaffected.v7",
+            6 => "chromium.mv2-impact-checker.split-extension-copies.return-unaffected.v6",
+            _ => "chromium.mv2-impact-checker.split-extension-copies.return-unaffected.v5",
+        };
+        var description = generation switch
+        {
+            7 => "Force both Chrome 155 MV2 impact-checker copies to take the unaffected path and neutralize the verified startup disable branch.",
+            6 => "Force both Chrome 153 MV2 impact-checker copies to take the unaffected path and neutralize the verified startup disable branch.",
+            _ => "Force both Chrome 152 MV2 impact-checker copies to take the unaffected path and neutralize the verified startup disable branch.",
+        };
 
         var target = new PatchTarget(
             ruleId,

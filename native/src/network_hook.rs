@@ -73,10 +73,20 @@ const CHROME_153_0_8010_37: HookRule = HookRule {
     cancel_prefix: &[0x56, 0x57, 0x48, 0x81, 0xEC, 0x98, 0x00, 0x00, 0x00],
 };
 
+const CHROME_155_0_8048_0: HookRule = HookRule {
+    start_rva: 0x0886AA0,
+    cancel_rva: 0x0AA62550,
+    url_chain_offset: 0x48,
+    gurl_size: 0x78,
+    start_prefix: &[0x41, 0x56, 0x56, 0x57, 0x53, 0x48, 0x83, 0xEC, 0x58],
+    cancel_prefix: &[0x56, 0x57, 0x48, 0x81, 0xEC, 0x98, 0x00, 0x00, 0x00],
+};
+
 const KNOWN_HOOK_RULES: &[HookRule] = &[
     CHROME_152_0_7977_65,
     CHROME_152_0_7977_76,
     CHROME_153_0_8010_37,
+    CHROME_155_0_8048_0,
 ];
 
 // Masked wildcard signatures for net::URLRequest::Start and net::URLRequest::CancelWithError
@@ -1140,6 +1150,11 @@ mod tests {
                 0x08BE450,
                 0x0A5A09C0,
             ),
+            (
+                r"C:\Program Files (x86)\Google\Chrome Dev\Application\155.0.8048.0\chrome.dll",
+                0x0886AA0,
+                0x0AA62550,
+            ),
         ];
 
         for (path, exp_start, exp_cancel) in possible_paths {
@@ -1208,6 +1223,11 @@ mod tests {
                 r"C:\Program Files\Google\Chrome\Application\152.0.7977.65\chrome.dll",
                 0x08BE450,
                 0x0A5A09C0,
+            ),
+            (
+                r"C:\Program Files (x86)\Google\Chrome Dev\Application\155.0.8048.0\chrome.dll",
+                0x0886AA0,
+                0x0AA62550,
             ),
             (
                 r"C:\Program Files\CocCoc\Browser\Application\151.0.7922.176\browser.dll",
