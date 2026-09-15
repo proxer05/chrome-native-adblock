@@ -64,6 +64,15 @@ public sealed class ChromeSupervisor : IDisposable
         }
     }
 
+    private static bool EnvFlag(string name) =>
+        string.Equals(Environment.GetEnvironmentVariable(name), "1", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>CNA_DISABLE_NETWORK_HOOK=1 skips native hook injection (for attribution).</summary>
+    private static bool NetworkHookDisabled => EnvFlag("CNA_DISABLE_NETWORK_HOOK");
+
+    /// <summary>CNA_DISABLE_COSMETIC=1 skips cosmetic/scriptlet injection (for attribution).</summary>
+    private static bool CosmeticInjectionDisabled => EnvFlag("CNA_DISABLE_COSMETIC");
+
     private void Log(string message, ConsoleColor color = ConsoleColor.Gray)
     {
         lock (_sync)
@@ -253,6 +262,11 @@ public sealed class ChromeSupervisor : IDisposable
             Log($"[Supervisor] Native Engine Version: {cosmeticEngine.GetVersion()}", ConsoleColor.Gray);
             cosmeticEngine.LoadFilterFile(_filterPath);
             injectionScriptFactory = url => CosmeticInjector.BuildInjectionScriptForUrl(cosmeticEngine, url);
+            if (CosmeticInjectionDisabled)
+            {
+                injectionScriptFactory = _ => string.Empty;
+                Log("[Supervisor] CNA_DISABLE_COSMETIC=1 - cosmetic/scriptlet injection is disabled for this session.", ConsoleColor.Yellow);
+            }
             Log("[Supervisor] Cosmetic payloads will be generated from the exact URL of each tab.", ConsoleColor.Gray);
         }
 
@@ -467,6 +481,12 @@ public sealed class ChromeSupervisor : IDisposable
 
                     if (isNew)
                     {
+                        if (NetworkHookDisabled)
+                        {
+                            Log($"[Supervisor] CNA_DISABLE_NETWORK_HOOK=1 - skipping hook injection for PID {networkPid}.", ConsoleColor.Yellow);
+                            continue;
+                        }
+
                         Log($"[Supervisor] Detected Network Service process (PID: {networkPid}). Injecting native hook...", ConsoleColor.Yellow);
 
                         try
