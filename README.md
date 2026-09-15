@@ -110,8 +110,13 @@ Create release archives:
   capability and ALL APPLICATION PACKAGES read/execute access on the engine
   files so the engine keeps loading on builds where the sandbox stays on
   without the hook (MV2-only mode).
-- CDP discovery trusts only a fresh `DevToolsActivePort` from the managed
-  profile; it does not fall back to another Chrome profile or port 9222.
+- Chrome is driven over CDP through `--remote-debugging-pipe` (inherited
+  anonymous pipes, no TCP listener and no DevToolsActivePort file). A TCP debug
+  port - even on an ephemeral port - is detectable from the page; YouTube
+  serves empty stream responses to debugged clients and playback stalls after
+  the preloaded fragment. Chrome refuses remote debugging on a channel's
+  default profile, so cosmetic injection requires the dedicated (or any
+  non-default) profile.
 - Filter downloads are HTTPS subscription URLs controlled by their respective
   maintainers. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 

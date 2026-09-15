@@ -29,7 +29,10 @@ public sealed class ChromeSupervisor : IDisposable
     private readonly LiveBlockMonitor? _liveBlockMonitor;
     private readonly HashSet<uint> _hookedNetworkProcesses = [];
     private readonly Lock _sync = new();
-    private int? _activeDevToolsPort;
+    private nint _cdpParentRead;
+    private nint _cdpParentWrite;
+    private (nint Read, nint Write) _chromePipeChildHandles;
+    private volatile CdpPipeClient? _cdpClient;
 
     public LiveBlockMonitor? Monitor => _liveBlockMonitor;
 
@@ -66,6 +69,48 @@ public sealed class ChromeSupervisor : IDisposable
 
     private static bool EnvFlag(string name) =>
         string.Equals(Environment.GetEnvironmentVariable(name), "1", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when the given user data dir is the default profile directory of the
+    /// detected Chrome channel; Google-Chrome-branded builds refuse remote
+    /// debugging (port or pipe) on their default user data directory.
+    /// </summary>
+    private bool IsChannelDefaultUserDataDir(string? userDataDir)
+    {
+        if (string.IsNullOrWhiteSpace(userDataDir))
+        {
+            return true;
+        }
+
+        try
+        {
+            var normalized = _chromePath.Replace('/', '\\');
+            var marker = normalized.IndexOf("\\Google\\", StringComparison.OrdinalIgnoreCase);
+            if (marker < 0)
+            {
+                return false;
+            }
+
+            var afterGoogle = marker + "\\Google\\".Length;
+            var application = normalized.IndexOf("\\Application\\", afterGoogle, StringComparison.OrdinalIgnoreCase);
+            if (application < 0)
+            {
+                return false;
+            }
+
+            var channelDefault = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Google", normalized[afterGoogle..application], "User Data");
+            return string.Equals(
+                Path.GetFullPath(userDataDir).TrimEnd(Path.DirectorySeparatorChar),
+                Path.GetFullPath(channelDefault).TrimEnd(Path.DirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
 
     /// <summary>CNA_DISABLE_NETWORK_HOOK=1 skips native hook injection (for attribution).</summary>
     private static bool NetworkHookDisabled => EnvFlag("CNA_DISABLE_NETWORK_HOOK");
@@ -116,7 +161,6 @@ public sealed class ChromeSupervisor : IDisposable
         }
 
         // 2. Prepare user data dir & Chrome launch arguments
-        var effectivePort = Math.Max(0, _options.RemoteDebuggingPort);
         var userDataArgument = _options.AdditionalArguments?
             .FirstOrDefault(a => a.StartsWith("--user-data-dir=", StringComparison.OrdinalIgnoreCase));
         var hasUserDataArg = userDataArgument != null;
@@ -135,9 +179,44 @@ public sealed class ChromeSupervisor : IDisposable
 
         var chromeArgumentsList = new List<string>();
         var additionalArguments = _options.AdditionalArguments;
+        var useCdpPipes = false;
         if (_options.EnableNativeAdblock)
         {
-            chromeArgumentsList.Add($"--remote-debugging-port={effectivePort}");
+            // Speak CDP over --remote-debugging-pipe instead of
+            // --remote-debugging-port. A TCP debug listener (even on an
+            // ephemeral port) is detectable from the page - YouTube serves
+            // empty stream responses to debugged clients and playback stalls
+            // after the preloaded fragment. The pipe transport has no socket
+            // and no DevToolsActivePort file, so nothing can be probed.
+            // Chrome refuses remote debugging entirely when the user data dir
+            // is the channel default, so pipes are only wired up for the
+            // dedicated (or any non-default) profile.
+            useCdpPipes = !IsChannelDefaultUserDataDir(effectiveUserDataDir);
+            if (useCdpPipes)
+            {
+                var sa = new NativeMethods.SecurityAttributes
+                {
+                    nLength = checked((uint)System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.SecurityAttributes>()),
+                    bInheritHandle = true
+                };
+                if (!NativeMethods.CreatePipe(out var chromeRead, out _cdpParentWrite, ref sa, 0) ||
+                    !NativeMethods.CreatePipe(out _cdpParentRead, out var chromeWrite, ref sa, 0))
+                {
+                    throw NativeMethods.Error("CreatePipe failed for the CDP transport");
+                }
+
+                // Our ends must not leak into Chrome; only the two child ends
+                // stay inheritable for CreateProcessW.
+                _ = NativeMethods.SetHandleInformation(_cdpParentRead, NativeMethods.HandleFlagInherit, 0);
+                _ = NativeMethods.SetHandleInformation(_cdpParentWrite, NativeMethods.HandleFlagInherit, 0);
+                _chromePipeChildHandles = (chromeRead, chromeWrite);
+                chromeArgumentsList.Add($"--remote-debugging-io-pipes={(uint)chromeRead.ToInt64()},{(uint)chromeWrite.ToInt64()}");
+                chromeArgumentsList.Add("--remote-debugging-pipe");
+            }
+            else
+            {
+                Log("[Supervisor] Chrome refuses remote debugging on the channel default profile - cosmetic injection is disabled for this session.", ConsoleColor.Yellow);
+            }
 
             // Chrome 155+ enables the network-service sandbox on some builds
             // (Finch). The sandboxed Network Service process gets a
@@ -271,7 +350,6 @@ public sealed class ChromeSupervisor : IDisposable
         }
 
         // 5. Launch Chrome process
-        var launchStartedUtc = DateTime.UtcNow;
         uint currentBrowserPid = 0;
         Process? browserProcess = null;
 
@@ -282,8 +360,10 @@ public sealed class ChromeSupervisor : IDisposable
                 installation,
                 mv2PatchTarget,
                 chromeArgumentsList,
-                TimeSpan.FromSeconds(30));
+                TimeSpan.FromSeconds(30),
+                inheritHandles: useCdpPipes);
 
+            CloseCdpChildHandles();
             currentBrowserPid = launchResult.ProcessId;
             Log($"[MV2] RAM patch successfully applied to chrome.dll in process PID: {launchResult.ProcessId} (Address: {launchResult.RemoteAddress}).", ConsoleColor.Green);
         }
@@ -292,17 +372,8 @@ public sealed class ChromeSupervisor : IDisposable
             var argsString = string.Join(' ', chromeArgumentsList.Select(ChromeDebugLauncher.QuoteArgument));
             Log($"[Supervisor] Launching Chrome: {_chromePath} {argsString}", ConsoleColor.Cyan);
 
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = _chromePath,
-                Arguments = argsString,
-                UseShellExecute = false
-            };
-
-            browserProcess = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("Failed to start Chrome browser process.");
-
-            currentBrowserPid = checked((uint)browserProcess.Id);
+            currentBrowserPid = ChromeDebugLauncher.LaunchDetached(_chromePath, chromeArgumentsList, inheritHandles: useCdpPipes);
+            CloseCdpChildHandles();
             Log($"[Supervisor] Chrome browser started with PID: {currentBrowserPid}", ConsoleColor.Green);
         }
         _options.StartedCallback?.Invoke(currentBrowserPid);
@@ -317,7 +388,7 @@ public sealed class ChromeSupervisor : IDisposable
         if (_options.EnableNativeAdblock)
         {
             networkHookTask = Task.Run(() => MonitorNetworkServiceLoopAsync(() => currentBrowserPid, effectiveUserDataDir, cts.Token), cts.Token);
-            cosmeticTask = Task.Run(() => MonitorDevToolsAndCosmeticsLoopAsync(effectiveUserDataDir, effectivePort, launchStartedUtc, injectionScriptFactory, cts.Token), cts.Token);
+            cosmeticTask = Task.Run(() => RunCdpPipeLoopAsync(injectionScriptFactory, cts.Token), cts.Token);
         }
 
         // 7. Supervise session lifetime
@@ -366,14 +437,7 @@ public sealed class ChromeSupervisor : IDisposable
                     var cdpActive = false;
                     if (_options.EnableNativeAdblock)
                     {
-                        if (_activeDevToolsPort.HasValue)
-                        {
-                            cdpActive = await IsCdpAliveAsync(_activeDevToolsPort.Value, cts.Token);
-                        }
-                        if (!cdpActive)
-                        {
-                            cdpActive = await IsCdpAliveAsync(effectivePort, cts.Token);
-                        }
+                        cdpActive = _cdpClient is { IsConnected: true };
                     }
 
                     if (cdpActive)
@@ -449,164 +513,44 @@ public sealed class ChromeSupervisor : IDisposable
         }
     }
 
-    private static async Task<bool> IsCdpAliveAsync(int port, CancellationToken cancellationToken)
+    private async Task RunCdpPipeLoopAsync(Func<string, string> injectionScriptFactory, CancellationToken cancellationToken)
     {
-        try
+        if (_cdpParentRead == 0 || _cdpParentWrite == 0)
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromMilliseconds(500) };
-            var res = await http.GetAsync($"http://127.0.0.1:{port}/json/version", cancellationToken);
-            return res.IsSuccessStatusCode;
+            return; // Pipe transport not in use for this session.
         }
-        catch
+
+        var client = new CdpPipeClient(_cdpParentRead, _cdpParentWrite, injectionScriptFactory)
         {
-            return false;
-        }
+            LogDiagnostics = message => Log(message, ConsoleColor.Yellow)
+        };
+        client.ConsoleMessage += (domain, type, text) => _cosmeticInjector.RaiseConsoleMessage(domain, type, text);
+        _cdpClient = client;
+        client.StartAsync(cancellationToken);
+        Log("[Supervisor] Connected to Chrome CDP over pipe. Cosmetic & scriptlet injection active on all tabs.", ConsoleColor.Magenta);
+
+        await client.Completion;
+        Log("[Supervisor] Chrome closed the CDP pipe.", ConsoleColor.DarkGray);
+        _cdpClient = null;
     }
 
-    private async Task MonitorNetworkServiceLoopAsync(Func<uint> getBrowserPid, string? userDataDir, CancellationToken cancellationToken)
+    /// <summary>
+    /// Closes this process's copies of the pipe ends that were inherited by
+    /// Chrome. Chrome keeps its own copies alive; dropping ours gives the pipe
+    /// clean EOF semantics when Chrome exits.
+    /// </summary>
+    private void CloseCdpChildHandles()
     {
-        while (!cancellationToken.IsCancellationRequested)
+        if (_chromePipeChildHandles.Read != 0)
         {
-            try
-            {
-                var browserPid = getBrowserPid();
-                var networkPids = ChromeProcesses.FindNetworkServices(browserPid, userDataDir);
-                foreach (var networkPid in networkPids)
-                {
-                    bool isNew;
-                    lock (_sync)
-                    {
-                        isNew = _hookedNetworkProcesses.Add(networkPid);
-                    }
-
-                    if (isNew)
-                    {
-                        if (NetworkHookDisabled)
-                        {
-                            Log($"[Supervisor] CNA_DISABLE_NETWORK_HOOK=1 - skipping hook injection for PID {networkPid}.", ConsoleColor.Yellow);
-                            continue;
-                        }
-
-                        Log($"[Supervisor] Detected Network Service process (PID: {networkPid}). Injecting native hook...", ConsoleColor.Yellow);
-
-                        try
-                        {
-                            var result = InjectionSmoke.InjectExisting(networkPid, _dllPath, _filterPath, installHook: true);
-                            Log($"[Supervisor] Successfully hooked Network Service (PID: {result.ProcessId}). Hook Status: Active ({result.HookResolutionMode}).", ConsoleColor.Green);
-                        }
-                        catch (Exception ex)
-                        {
-                            Log($"[Supervisor] Failed to inject hook into PID {networkPid}: {ex.Message}", ConsoleColor.Red);
-                            lock (_sync)
-                            {
-                                _hookedNetworkProcesses.Remove(networkPid);
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception)
-            {
-                // Continue polling
-            }
-
-            try
-            {
-                await Task.Delay(250, cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
+            _ = NativeMethods.CloseHandle(_chromePipeChildHandles.Read);
+            _chromePipeChildHandles.Read = 0;
         }
-    }
-
-    private async Task MonitorDevToolsAndCosmeticsLoopAsync(string? userDataDir, int targetPort, DateTime launchStartedUtc, Func<string, string> injectionScriptFactory, CancellationToken cancellationToken)
-    {
-        // 1. Locate and verify DevTools port
-        while (!cancellationToken.IsCancellationRequested && _activeDevToolsPort == null)
+        if (_chromePipeChildHandles.Write != 0)
         {
-            _activeDevToolsPort = await ResolveAndVerifyDevToolsPortAsync(userDataDir, targetPort, launchStartedUtc, cancellationToken);
-            if (_activeDevToolsPort.HasValue)
-            {
-                Log($"[Supervisor] Connected to Chrome CDP on port {_activeDevToolsPort.Value}. Cosmetic & scriptlet injection active on all tabs.", ConsoleColor.Magenta);
-                break;
-            }
-
-            try
-            {
-                await Task.Delay(200, cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
+            _ = NativeMethods.CloseHandle(_chromePipeChildHandles.Write);
+            _chromePipeChildHandles.Write = 0;
         }
-
-        if (_activeDevToolsPort == null) return;
-
-        // 2. Start continuous cosmetic injection
-        await _cosmeticInjector.StartMonitoringAsync(
-            () => _activeDevToolsPort,
-            injectionScriptFactory,
-            cancellationToken);
-    }
-
-    private static async Task<int?> ResolveAndVerifyDevToolsPortAsync(string? userDataDir, int explicitPort, DateTime launchStartedUtc, CancellationToken cancellationToken)
-    {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-
-        // Trust only the DevToolsActivePort emitted by this launch's dedicated
-        // profile. This prevents attaching to an unrelated Chrome instance.
-        if (!string.IsNullOrWhiteSpace(userDataDir))
-        {
-            var portFile = Path.Combine(userDataDir, "DevToolsActivePort");
-            if (File.Exists(portFile))
-            {
-                try
-                {
-                    var lines = File.ReadAllLines(portFile);
-                    var freshEnough = File.GetLastWriteTimeUtc(portFile) >= launchStartedUtc.AddSeconds(-2);
-                    if (freshEnough && lines.Length >= 2 && int.TryParse(lines[0], out var port) && port > 0)
-                    {
-                        try
-                        {
-                            var res = await http.GetAsync($"http://127.0.0.1:{port}/json/version", cancellationToken);
-                            if (res.IsSuccessStatusCode)
-                            {
-                                var versionJson = await res.Content.ReadAsStringAsync(cancellationToken);
-                                using var document = System.Text.Json.JsonDocument.Parse(versionJson);
-                                if (document.RootElement.TryGetProperty("webSocketDebuggerUrl", out var wsProperty) &&
-                                    Uri.TryCreate(wsProperty.GetString(), UriKind.Absolute, out var wsUri) &&
-                                    string.Equals(wsUri.AbsolutePath, lines[1].Trim(), StringComparison.Ordinal))
-                                {
-                                    return port;
-                                }
-                            }
-                        }
-                        catch { }
-                    }
-                }
-                catch { }
-            }
-        }
-
-        // An explicit non-zero port remains supported for diagnostics, but only
-        // when no profile was supplied. The default production path uses port 0.
-        if (string.IsNullOrWhiteSpace(userDataDir) && explicitPort > 0)
-        {
-            try
-            {
-                var res = await http.GetAsync($"http://127.0.0.1:{explicitPort}/json/version", cancellationToken);
-                if (res.IsSuccessStatusCode)
-                {
-                    return explicitPort;
-                }
-            }
-            catch { }
-        }
-
-        return null;
     }
 
     private static string FindRepositoryRoot()
@@ -626,6 +570,18 @@ public sealed class ChromeSupervisor : IDisposable
 
     public void Dispose()
     {
+        _cdpClient?.Dispose();
+        if (_cdpParentRead != 0)
+        {
+            _ = NativeMethods.CloseHandle(_cdpParentRead);
+            _cdpParentRead = 0;
+        }
+        if (_cdpParentWrite != 0)
+        {
+            _ = NativeMethods.CloseHandle(_cdpParentWrite);
+            _cdpParentWrite = 0;
+        }
+        CloseCdpChildHandles();
         _liveBlockMonitor?.Dispose();
         _cosmeticInjector.Dispose();
     }

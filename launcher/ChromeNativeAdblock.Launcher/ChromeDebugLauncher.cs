@@ -12,7 +12,8 @@ public static class ChromeDebugLauncher
         ChromeInstallation installation,
         PatchTarget target,
         IReadOnlyList<string> chromeArguments,
-        TimeSpan timeout)
+        TimeSpan timeout,
+        bool inheritHandles = false)
     {
         EnsureChromeIsNotRunning();
         if (target.State == PatchState.AlreadyPatched)
@@ -31,7 +32,7 @@ public static class ChromeDebugLauncher
                 commandLine,
                 IntPtr.Zero,
                 IntPtr.Zero,
-                false,
+                inheritHandles,
                 NativeMethods.DebugOnlyThisProcess | NativeMethods.CreateUnicodeEnvironment,
                 IntPtr.Zero,
                 Path.GetDirectoryName(installation.ExecutablePath),
@@ -139,6 +140,38 @@ public static class ChromeDebugLauncher
             _ = NativeMethods.CloseHandle(processInfo.hThread);
             _ = NativeMethods.CloseHandle(processInfo.hProcess);
         }
+    }
+
+    /// <summary>
+    /// Launches Chrome without the debug interception used for the MV2 RAM patch.
+    /// Used when the MV2 enabler is off; supports inheriting the CDP pipe handles.
+    /// </summary>
+    public static uint LaunchDetached(string executablePath, IReadOnlyList<string> chromeArguments, bool inheritHandles)
+    {
+        var commandLine = new StringBuilder(BuildCommandLine(executablePath, chromeArguments));
+        var startupInfo = new NativeMethods.StartupInfo
+        {
+            cb = checked((uint)Marshal.SizeOf<NativeMethods.StartupInfo>())
+        };
+
+        if (!NativeMethods.CreateProcessW(
+                executablePath,
+                commandLine,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                inheritHandles,
+                NativeMethods.CreateUnicodeEnvironment,
+                IntPtr.Zero,
+                Path.GetDirectoryName(executablePath),
+                ref startupInfo,
+                out var processInfo))
+        {
+            throw NativeMethods.Error("CreateProcessW failed");
+        }
+
+        _ = NativeMethods.CloseHandle(processInfo.hThread);
+        _ = NativeMethods.CloseHandle(processInfo.hProcess);
+        return processInfo.dwProcessId;
     }
 
     private static LaunchResult PatchRemoteProcess(

@@ -9,6 +9,27 @@ internal static class NativeMethods
     internal const uint CreateSuspended = 0x00000004;
     internal const uint CreateUnicodeEnvironment = 0x00000400;
     internal const uint DebugOnlyThisProcess = 0x00000002;
+    internal const uint HandleFlagInherit = 0x00000001;
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SecurityAttributes
+    {
+        public uint nLength;
+        internal nint lpSecurityDescriptor;
+        [MarshalAs(UnmanagedType.Bool)] public bool bInheritHandle;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool CreatePipe(
+        out nint hReadPipe,
+        out nint hWritePipe,
+        ref SecurityAttributes lpPipeAttributes,
+        uint nSize);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetHandleInformation(nint hObject, uint dwMask, uint dwFlags);
     internal const uint MemCommit = 0x00001000;
     internal const uint MemReserve = 0x00002000;
     internal const uint MemRelease = 0x00008000;

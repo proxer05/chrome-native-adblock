@@ -18,6 +18,13 @@ public sealed class CosmeticInjector : IDisposable
 {
     public event Action<string, string, string>? OnConsoleMessage;
 
+    /// <summary>
+    /// Raises OnConsoleMessage for a console event received through an external
+    /// transport (the CDP pipe client), routing it to the live block monitor.
+    /// </summary>
+    internal void RaiseConsoleMessage(string domain, string type, string text)
+        => OnConsoleMessage?.Invoke(domain, type, text);
+
     private sealed class ActiveTabSession : IAsyncDisposable
     {
         public required string TargetId { get; init; }
