@@ -81,7 +81,7 @@ internal static class InjectionSmoke
             }
             resumed = true;
 
-            var injection = Inject(processInfo.dwProcessId, processInfo.hProcess, dllPath, filterPath, installHook);
+            var injection = Inject(processInfo.dwProcessId, processInfo.hProcess, dllPath, filterPath, installHook, progress: null);
 
             afterHook?.Invoke(profilePath, processInfo.dwProcessId);
 
