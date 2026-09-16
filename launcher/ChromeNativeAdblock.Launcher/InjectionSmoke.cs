@@ -134,7 +134,7 @@ internal static class InjectionSmoke
         }
     }
 
-    internal static RemoteInjectionResult InjectExisting(uint processId, string dllPath, string filterPath, bool installHook)
+    internal static RemoteInjectionResult InjectExisting(uint processId, string dllPath, string filterPath, bool installHook, Action<string>? progress = null)
     {
         var process = NativeMethods.OpenProcess(NativeMethods.InjectionProcessAccess, false, processId);
         if (process == 0)
@@ -143,7 +143,7 @@ internal static class InjectionSmoke
         }
         try
         {
-            return Inject(processId, process, dllPath, filterPath, installHook);
+            return Inject(processId, process, dllPath, filterPath, installHook, progress);
         }
         finally
         {
@@ -151,14 +151,16 @@ internal static class InjectionSmoke
         }
     }
 
-    private static RemoteInjectionResult Inject(uint processId, nint process, string dllPath, string filterPath, bool installHook)
+    private static RemoteInjectionResult Inject(uint processId, nint process, string dllPath, string filterPath, bool installHook, Action<string>? progress)
     {
         // Chrome 155+ may run the Network Service inside a per-channel LPAC
         // (kNetworkServiceSandbox) whose token cannot read arbitrary build
         // directories. Grant the capability read/execute access to the engine
         // files before attempting the remote load; the sandbox itself stays on.
+        progress?.Invoke($"[Hook] PID {processId}: granting engine file access to the target token");
         ChromeLpacAccess.GrantEngineAccess(processId, dllPath, filterPath);
 
+        progress?.Invoke($"[Hook] PID {processId}: locating kernel32 in the target");
         var remoteKernel32 = FindRemoteModule(processId, "kernel32.dll");
         var localKernel32 = NativeLibrary.Load("kernel32.dll");
         nint loadLibraryRva;
@@ -172,6 +174,7 @@ internal static class InjectionSmoke
         }
 
         using var remoteDllPath = RemoteAllocation.WriteUtf16(process, dllPath);
+        progress?.Invoke($"[Hook] PID {processId}: remote LoadLibraryW of the engine");
         var loadLibraryResult = RunRemoteThread(
             process, remoteKernel32.BaseAddress + loadLibraryRva, remoteDllPath.Address, "LoadLibraryW");
         if (loadLibraryResult == 0)
@@ -202,6 +205,7 @@ internal static class InjectionSmoke
         }
 
         using var remoteFilterPath = RemoteAllocation.WriteUtf16(process, filterPath);
+        progress?.Invoke($"[Hook] PID {processId}: engine initialization (filter load)");
         var initializeExitCode = RunRemoteThread(
             process,
             remoteDll.BaseAddress + initializeRva,
@@ -217,6 +221,7 @@ internal static class InjectionSmoke
         if (installHook)
         {
             _ = FindRemoteModule(processId, "chrome.dll");
+            progress?.Invoke($"[Hook] PID {processId}: installing the network hook (pattern scan)");
             hookInstallExitCode = RunRemoteThread(
                 process,
                 remoteDll.BaseAddress + installHookRva,

@@ -580,7 +580,9 @@ public sealed class ChromeSupervisor : IDisposable
 
                         try
                         {
-                            var result = InjectionSmoke.InjectExisting(networkPid, _dllPath, _filterPath, installHook: true);
+                            var result = InjectionSmoke.InjectExisting(
+                                networkPid, _dllPath, _filterPath, installHook: true,
+                                progress => Log(progress, ConsoleColor.DarkGray));
                             Log($"[Supervisor] Successfully hooked Network Service (PID: {result.ProcessId}). Hook Status: Active ({result.HookResolutionMode}).", ConsoleColor.Green);
                         }
                         catch (Exception ex)
