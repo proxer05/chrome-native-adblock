@@ -517,7 +517,18 @@ public sealed class ChromeSupervisor : IDisposable
         finally
         {
             cts.Cancel();
-            try { await Task.WhenAll(networkHookTask, cosmeticTask); } catch { }
+            // The summary prints before this runs, so a background task that
+            // hangs or faults after Chrome exits would otherwise be invisible
+            // (or hang the process with no output). Log both outcomes.
+            try
+            {
+                await Task.WhenAll(networkHookTask, cosmeticTask);
+                Log("[Supervisor] Background tasks completed.", ConsoleColor.DarkGray);
+            }
+            catch (Exception ex)
+            {
+                Log($"[Supervisor] Background task faulted during shutdown: {ex.GetType().Name}: {ex.Message}", ConsoleColor.Red);
+            }
             browserProcess?.Dispose();
             cosmeticEngine?.Dispose();
         }
@@ -596,9 +607,17 @@ public sealed class ChromeSupervisor : IDisposable
                     }
                 }
             }
-            catch (Exception)
+            catch (OperationCanceledException)
             {
-                // Continue polling
+                break;
+            }
+            catch (Exception ex)
+            {
+                // Continue polling, but say so - a monitor loop that throws
+                // every iteration otherwise looks identical to one that finds
+                // nothing (and nothing being hooked is exactly the failure we
+                // are chasing).
+                Log($"[Supervisor] Network service scan failed: {ex.GetType().Name}: {ex.Message}", ConsoleColor.Red);
             }
 
             try
@@ -614,23 +633,42 @@ public sealed class ChromeSupervisor : IDisposable
 
     private async Task RunCdpPipeLoopAsync(Func<string, string> injectionScriptFactory, CancellationToken cancellationToken)
     {
+        // Entry/exit logging: a silently faulting CDP task is indistinguishable
+        // from a pipe that was never wired up, and both look like "cosmetic
+        // injection just doesn't happen". Log every path out of this loop.
+        Log($"[CDP] Pipe loop starting (parent read=0x{_cdpParentRead:X}, write=0x{_cdpParentWrite:X}).", ConsoleColor.DarkGray);
         if (_cdpParentRead == 0 || _cdpParentWrite == 0)
         {
-            return; // Pipe transport not in use for this session.
+            Log("[CDP] Pipe transport not in use for this session.", ConsoleColor.DarkGray);
+            return;
         }
 
-        var client = new CdpPipeClient(_cdpParentRead, _cdpParentWrite, injectionScriptFactory)
+        try
         {
-            LogDiagnostics = message => Log(message, ConsoleColor.Yellow)
-        };
-        client.ConsoleMessage += (domain, type, text) => _cosmeticInjector.RaiseConsoleMessage(domain, type, text);
-        _cdpClient = client;
-        client.StartAsync(cancellationToken);
-        Log("[Supervisor] Connected to Chrome CDP over pipe. Cosmetic & scriptlet injection active on all tabs.", ConsoleColor.Magenta);
+            var client = new CdpPipeClient(_cdpParentRead, _cdpParentWrite, injectionScriptFactory)
+            {
+                LogDiagnostics = message => Log(message, ConsoleColor.Yellow)
+            };
+            client.ConsoleMessage += (domain, type, text) => _cosmeticInjector.RaiseConsoleMessage(domain, type, text);
+            _cdpClient = client;
+            client.StartAsync(cancellationToken);
+            Log("[Supervisor] Connected to Chrome CDP over pipe. Cosmetic & scriptlet injection active on all tabs.", ConsoleColor.Magenta);
 
-        await client.Completion;
-        Log("[Supervisor] Chrome closed the CDP pipe.", ConsoleColor.DarkGray);
-        _cdpClient = null;
+            await client.Completion;
+            Log("[Supervisor] Chrome closed the CDP pipe.", ConsoleColor.DarkGray);
+        }
+        catch (OperationCanceledException)
+        {
+            Log("[CDP] Pipe loop cancelled.", ConsoleColor.DarkGray);
+        }
+        catch (Exception ex)
+        {
+            Log($"[CDP] Pipe loop faulted: {ex.GetType().Name}: {ex.Message}", ConsoleColor.Red);
+        }
+        finally
+        {
+            _cdpClient = null;
+        }
     }
 
     /// <summary>
