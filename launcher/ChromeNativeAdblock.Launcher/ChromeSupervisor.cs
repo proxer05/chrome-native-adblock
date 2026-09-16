@@ -118,6 +118,14 @@ public sealed class ChromeSupervisor : IDisposable
     /// <summary>CNA_DISABLE_COSMETIC=1 skips cosmetic/scriptlet injection (for attribution).</summary>
     private static bool CosmeticInjectionDisabled => EnvFlag("CNA_DISABLE_COSMETIC");
 
+    /// <summary>
+    /// CNA_DISABLE_CDP=1 launches Chrome without the CDP debug pipe entirely
+    /// (for attribution). Unlike CNA_DISABLE_COSMETIC, which keeps the pipe
+    /// attached but injects nothing, this removes the debugger from the
+    /// process completely - cosmetic injection is impossible in this mode.
+    /// </summary>
+    private static bool CdpTransportDisabled => EnvFlag("CNA_DISABLE_CDP");
+
     private void Log(string message, ConsoleColor color = ConsoleColor.Gray)
     {
         lock (_sync)
@@ -154,6 +162,28 @@ public sealed class ChromeSupervisor : IDisposable
         {
             installation = ChromeInstallationFinder.Find(_chromePath);
             Log($"[Supervisor] Chrome detected: {installation.Version} ({installation.ExecutablePath})", ConsoleColor.Gray);
+
+            // Every attribution run must be interpretable from its log alone:
+            // state the isolation switches and the exact Chrome command line
+            // up front, so a result can never be attributed to the wrong
+            // configuration.
+            var isolationSwitches = new List<string>();
+            if (NetworkHookDisabled)
+            {
+                isolationSwitches.Add("CNA_DISABLE_NETWORK_HOOK");
+            }
+            if (CosmeticInjectionDisabled)
+            {
+                isolationSwitches.Add("CNA_DISABLE_COSMETIC");
+            }
+            if (CdpTransportDisabled)
+            {
+                isolationSwitches.Add("CNA_DISABLE_CDP");
+            }
+            if (isolationSwitches.Count > 0)
+            {
+                Log($"[Supervisor] Isolation switches active: {string.Join(", ", isolationSwitches)}.", ConsoleColor.Yellow);
+            }
         }
         catch (Exception ex)
         {
@@ -191,7 +221,7 @@ public sealed class ChromeSupervisor : IDisposable
             // Chrome refuses remote debugging entirely when the user data dir
             // is the channel default, so pipes are only wired up for the
             // dedicated (or any non-default) profile.
-            useCdpPipes = !IsChannelDefaultUserDataDir(effectiveUserDataDir);
+            useCdpPipes = !IsChannelDefaultUserDataDir(effectiveUserDataDir) && !CdpTransportDisabled;
             if (useCdpPipes)
             {
                 var sa = new NativeMethods.SecurityAttributes
@@ -213,6 +243,10 @@ public sealed class ChromeSupervisor : IDisposable
                 chromeArgumentsList.Add($"--remote-debugging-io-pipes={(uint)chromeRead.ToInt64()},{(uint)chromeWrite.ToInt64()}");
                 chromeArgumentsList.Add("--remote-debugging-pipe");
             }
+            else if (CdpTransportDisabled)
+            {
+                Log("[Supervisor] CNA_DISABLE_CDP=1 - CDP transport disabled; cosmetic injection is off for this session.", ConsoleColor.Yellow);
+            }
             else
             {
                 Log("[Supervisor] Chrome refuses remote debugging on the channel default profile - cosmetic injection is disabled for this session.", ConsoleColor.Yellow);
@@ -231,7 +265,11 @@ public sealed class ChromeSupervisor : IDisposable
             var userDisableFeatures = additionalArguments?.FirstOrDefault(
                 a => a.StartsWith(disableFeaturesPrefix, StringComparison.OrdinalIgnoreCase));
             var userFeatures = userDisableFeatures?[disableFeaturesPrefix.Length..];
-            var needsFeature = userFeatures?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            // The flag exists solely so the hook DLL can load into the
+            // network service. With CNA_DISABLE_NETWORK_HOOK=1 it changes
+            // nothing but Chrome's own behavior, so skip it to keep
+            // attribution runs (and hook-less sessions) pristine.
+            var needsFeature = !NetworkHookDisabled && userFeatures?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Contains(networkSandboxFeature, StringComparer.OrdinalIgnoreCase) != true;
             if (needsFeature)
             {
@@ -356,6 +394,7 @@ public sealed class ChromeSupervisor : IDisposable
         if (_options.EnableMv2Enabler && mv2PatchTarget != null && installation != null)
         {
             Log($"[MV2] Launching Chrome with RAM patch interception: {installation.ExecutablePath}", ConsoleColor.Cyan);
+            Log($"[MV2] Chrome arguments: {string.Join(' ', chromeArgumentsList.Select(ChromeDebugLauncher.QuoteArgument))}", ConsoleColor.Gray);
             var launchResult = ChromeDebugLauncher.Launch(
                 installation,
                 mv2PatchTarget,
